@@ -19,12 +19,12 @@ use windows::Win32::Foundation::{HINSTANCE, BOOL, TRUE, FALSE};
 pub extern "system" fn DllMain(_dll_module: HINSTANCE, reason: u32, _reserved: *const ()) -> BOOL {
 	if reason != 1 /* DLL_PROCESS_ATTACH */ { return TRUE }
 
-	println!("SoraData: init for {}", *NAME);
+	println!("LB-ARK: init for {}", *NAME);
 
 	match init() {
 		Ok(()) => TRUE,
 		Err(e) => {
-			println!("SoraData: init failed: {e:?}");
+			println!("LB-ARK: init failed: {e:?}");
 			FALSE
 		}
 	}
