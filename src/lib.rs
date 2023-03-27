@@ -38,7 +38,7 @@ pub extern "system" fn DllMain(_dll_module: HINSTANCE, reason: u32, _reserved: *
 #[allow(non_snake_case)]
 pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
 	// I don't think this function is ever called. If I'm wrong, oh well.
-	println!("SoraData: DirectXFileCreate called");
+	println!("LB-ARK: DirectXFileCreate called");
 	std::process::abort()
 }
 
