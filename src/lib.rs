@@ -103,7 +103,7 @@ impl DirEntry {
 	}
 }
 
-mod tour {
+mod hooks {
 	use retour::static_detour;
 	static_detour! {
 		pub static read_from_file: extern "thiscall" fn(*const super::HANDLE, *mut u8, usize) -> usize;
@@ -112,13 +112,13 @@ mod tour {
 
 fn init() -> anyhow::Result<()> {
 	unsafe {
-		tour::read_from_file.initialize(ADDRS.read_from_file(), test)?.enable()?;
+		hooks::read_from_file.initialize(ADDRS.read_from_file(), read_from_file)?.enable()?;
 	}
 
 	Ok(())
 }
 
-fn test(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
+fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 	let mut path = [0; 260];
 	let n = unsafe {
 		GetFinalPathNameByHandleW(*handle, &mut path, FILE_NAME(0))
@@ -161,7 +161,7 @@ fn test(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 		}
 	}
 
-	tour::read_from_file.call(handle, buf, len)
+	hooks::read_from_file.call(handle, buf, len)
 }
 
 fn parse_archive_nr(path: &Path) -> Option<usize> {
