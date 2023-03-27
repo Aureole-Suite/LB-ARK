@@ -106,7 +106,7 @@ impl DirEntry {
 mod hooks {
 	use retour::static_detour;
 	static_detour! {
-		pub static read_from_file: extern "thiscall" fn(*const super::HANDLE, *mut u8, usize) -> usize;
+		pub static read_from_file: unsafe extern "thiscall" fn(*const super::HANDLE, *mut u8, usize) -> usize;
 	}
 }
 
@@ -161,7 +161,9 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 		}
 	}
 
-	hooks::read_from_file.call(handle, buf, len)
+	unsafe {
+		hooks::read_from_file.call(handle, buf, len)
+	}
 }
 
 fn parse_archive_nr(path: &Path) -> Option<usize> {
