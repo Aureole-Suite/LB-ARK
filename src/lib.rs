@@ -1,6 +1,4 @@
-#![feature(naked_functions)]
 #![feature(abi_thiscall)]
-#![feature(let_chains)]
 
 use std::borrow::Cow;
 use std::ffi::OsString;
