@@ -43,19 +43,13 @@ pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
 }
 
 lazy_static::lazy_static! {
-	static ref EXE_PATH: PathBuf = {
+	static ref NAME: &'static str = {
 		let mut path = [0; 260];
 		let n = unsafe {
 			GetModuleFileNameW(HINSTANCE(0), &mut path)
 		};
 		let path = OsString::from_wide(&path[..n as usize]);
-		PathBuf::from(path)
-	};
-	static ref GAME_DIR: &'static Path = {
-		EXE_PATH.parent().unwrap()
-	};
-	static ref NAME: &'static str = {
-		let name = EXE_PATH.file_stem().unwrap().to_str().unwrap();
+		let name = Path::new(&path).file_stem().unwrap().to_str().unwrap();
 		Box::leak(name.to_lowercase().into_boxed_str())
 	};
 	static ref ADDRS: Addrs = Addrs::get(*NAME).expect("exe not supported");
