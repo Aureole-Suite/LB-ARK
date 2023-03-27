@@ -1,13 +1,17 @@
 #![feature(naked_functions)]
+#![feature(abi_thiscall)]
+#![feature(let_chains)]
 
 use std::borrow::Cow;
 use std::ffi::OsString;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Read, Write};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{PathBuf, Path};
 
+use windows::Win32::Storage::FileSystem::{SetFilePointer, FILE_NAME, SET_FILE_POINTER_MOVE_METHOD, GetFinalPathNameByHandleW};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::core::HRESULT;
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Foundation::{HINSTANCE, BOOL, TRUE, FALSE};
 
 #[no_mangle]
@@ -37,11 +41,11 @@ pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
 lazy_static::lazy_static! {
 	static ref EXE_PATH: PathBuf = {
 		let mut path = [0; 260];
-		unsafe {
-			GetModuleFileNameW(HINSTANCE(0), &mut path);
-		}
-		let path = &path[..path.iter().position(|a| *a == 0).expect("has nul")];
-		PathBuf::from(OsString::from_wide(path))
+		let n = unsafe {
+			GetModuleFileNameW(HINSTANCE(0), &mut path)
+		};
+		let path = OsString::from_wide(&path[..n as usize]);
+		PathBuf::from(path)
 	};
 	static ref GAME_DIR: &'static Path = {
 		EXE_PATH.parent().unwrap()
@@ -67,7 +71,7 @@ macro_rules! Addrs {
 }
 
 Addrs! {
-	read_from_dat: unsafe extern "fastcall" fn(*mut u8, u32, usize, usize) -> bool,
+	read_from_file: extern "thiscall" fn(*const HANDLE, *mut u8, usize) -> usize,
 	dir_entries: &[&[DirEntry; 4096]; 64],
 }
 
@@ -75,8 +79,8 @@ impl Addrs {
 	fn get(name: &str) -> Option<Addrs> {
 		match name {
 			"ed6_win3_dx9" => Some(Addrs {
-				read_from_dat: 0x004A2C50,
-				dir_entries:   0x00992DC0,
+				read_from_file: 0x004A4DD0,
+				dir_entries:    0x00992DC0,
 			}),
 			_ => None,
 		}
@@ -101,79 +105,74 @@ impl DirEntry {
 	}
 }
 
+mod tour {
+	use retour::static_detour;
+	static_detour! {
+		pub static read_from_file: extern "thiscall" fn(*const super::HANDLE, *mut u8, usize) -> usize;
+	}
+}
+
 fn init() -> anyhow::Result<()> {
 	unsafe {
-		tour(ADDRS.read_from_dat() as *const (), read_from_dat_wrap as *const ())?;
+		tour::read_from_file.initialize(ADDRS.read_from_file(), test)?.enable()?;
 	}
 
 	Ok(())
 }
 
-unsafe fn tour(a: *const (), b: *const ()) -> anyhow::Result<()> {
-	let r = retour::RawDetour::new(a, b)?;
-	r.enable()?;
-	std::mem::forget(r);
-	Ok(())
-}
+fn test(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
+	let mut path = [0; 260];
+	let n = unsafe {
+		GetFinalPathNameByHandleW(*handle, &mut path, FILE_NAME(0))
+	} as usize;
+	let path = OsString::from_wide(&path[..n]);
+	let path = PathBuf::from(path);
 
-// read_from_dat has an unusual callconv that is like fastcall, but caller-cleanup.
-#[naked]
-unsafe extern "fastcall" fn read_from_dat_wrap(buf: *mut u8, archive_no: u32, offset: usize, length: usize) -> bool {
-	std::arch::asm! {
-		"push [esp+8]",
-		"push [esp+8]",
-		"call {read_from_dat}",
-		"ret",
-		read_from_dat = sym read_from_dat,
-		options(noreturn)
-	}
-}
+	if let Some(nr) = parse_archive_nr(&path) {
+		let pos = unsafe {
+			SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
+		} as usize;
 
-extern "fastcall" fn read_from_dat(buf: *mut u8, archive_no: u32, offset: usize, length: usize) -> bool {
-	match do_read(buf, archive_no, offset, length) {
-		Ok(()) => true,
-		Err(e) => {
-			println!("SoraData: read failed: {e:?}");
-			false
-		}
-	}
-}
+		let index = ADDRS.dir_entries()[nr].iter()
+			.position(|e| e.offset == pos && e.csize == len);
 
-fn do_read(buf: *mut u8, archive_no: u32, offset: usize, length: usize) -> anyhow::Result<()> {
-	let index = ADDRS.dir_entries()[archive_no as usize].iter()
-		.position(|e| e.offset == offset && e.csize == length);
-	if let Some(index) = index {
-		let raw_name = &ADDRS.dir_entries()[archive_no as usize][index].name();
-		let name = format!("data/ED6_DT{archive_no:02x}/{}", normalize_name(raw_name));
+		if let Some(index) = index {
+			let raw_name = &ADDRS.dir_entries()[nr][index].name();
+			let name = format!("data/ED6_DT{nr:02x}/{}", normalize_name(raw_name));
 
-		println!("SoraData: {name}");
+			println!("SoraData: {name}");
 
-		let path = GAME_DIR.join(&name);
-		if path.exists() {
-			println!("   exists, redirecting");
-			if is_raw(&name) {
-				let mut f = std::fs::File::open(path)?;
-				let buf = unsafe { std::slice::from_raw_parts_mut(buf, length) };
-				f.read_exact(buf)?;
-			} else {
-				let data = std::fs::read(path)?;
-				let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
-				fake_compress(&mut std::io::Cursor::new(buf), &data)?;
+			let path = GAME_DIR.join(&name);
+			if path.exists() {
+				println!("   exists, redirecting");
+				if is_raw(&name) {
+					let mut f = std::fs::File::open(path).unwrap();
+					let buf = unsafe { std::slice::from_raw_parts_mut(buf, len) };
+					f.read_exact(buf).unwrap();
+					return len
+				} else {
+					let data = std::fs::read(path).unwrap();
+					let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
+					let mut f = std::io::Cursor::new(buf);
+					fake_compress(&mut f, &data).unwrap();
+					return f.position() as usize
+				}
 			}
-			return Ok(())
 		}
 	}
 
-	let datfile = GAME_DIR.join(format!("ED6_DT{archive_no:02x}.DAT"));
-	let mut f = std::fs::File::open(datfile)?;
-	f.seek(SeekFrom::Start(offset as u64))?;
-	let buf = unsafe { std::slice::from_raw_parts_mut(buf, length) };
-	f.read_exact(buf)?;
-	Ok(())
+	tour::read_from_file.call(handle, buf, len)
+}
+
+fn parse_archive_nr(path: &Path) -> Option<usize> {
+	let name = path.file_name()?.to_str()?;
+	let name = name.strip_prefix("ED6_DT")?.strip_suffix(".dat")?;
+	usize::from_str_radix(name, 16).ok()
 }
 
 fn fake_compress(buf: &mut impl Write, data: &[u8]) -> anyhow::Result<()> {
 	let mut chunks = data.chunks(0x1FFF).peekable();
+	// include an empty chunk, because otherwise it'll just read uninitialized data
 	buf.write_all(&u16::to_le_bytes(2))?;
 	buf.write_all(&[chunks.peek().is_some().into()])?;
 	while let Some(chunk) = chunks.next() {

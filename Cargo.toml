@@ -8,8 +8,7 @@ name = "d3dxof"
 crate-type = ["cdylib"]
 
 [dependencies]
-windows = { version = "0.46.0", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
-widestring = "1.0.2"
+windows = { version = "0.46.0", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_Storage_FileSystem"] }
 retour = "0.1.0"
 anyhow = "1.0.70"
 lazy_static = "1.4.0"
