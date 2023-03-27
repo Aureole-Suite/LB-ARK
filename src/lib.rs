@@ -137,25 +137,27 @@ fn test(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 			.position(|e| e.offset == pos && e.csize == len);
 
 		if let Some(index) = index {
-			let raw_name = &ADDRS.dir_entries()[nr][index].name();
-			let name = format!("data/ED6_DT{nr:02x}/{}", normalize_name(raw_name));
+			let raw_name = ADDRS.dir_entries()[nr][index].name();
+			let data_dir = path.parent().unwrap().join("data");
+			let dir = data_dir.join(format!("ED6_DT{nr:02X}"));
 
-			println!("SoraData: {name}");
-
-			let path = GAME_DIR.join(&name);
-			if path.exists() {
-				println!("   exists, redirecting");
-				if is_raw(&name) {
-					let mut f = std::fs::File::open(path).unwrap();
-					let buf = unsafe { std::slice::from_raw_parts_mut(buf, len) };
-					f.read_exact(buf).unwrap();
-					return len
-				} else {
-					let data = std::fs::read(path).unwrap();
-					let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
-					let mut f = std::io::Cursor::new(buf);
-					fake_compress(&mut f, &data).unwrap();
-					return f.position() as usize
+			for path in [
+				dir.join(normalize_name(&raw_name)),
+				dir.join(&*raw_name),
+			] {
+				if path.exists() {
+					if is_raw(&raw_name) {
+						let mut f = std::fs::File::open(path).unwrap();
+						let buf = unsafe { std::slice::from_raw_parts_mut(buf, len) };
+						f.read_exact(buf).unwrap();
+						return len
+					} else {
+						let data = std::fs::read(path).unwrap();
+						let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
+						let mut f = std::io::Cursor::new(buf);
+						fake_compress(&mut f, &data).unwrap();
+						return f.position() as usize
+					}
 				}
 			}
 		}
@@ -195,5 +197,5 @@ pub fn normalize_name(name: &str) -> String {
 }
 
 pub fn is_raw(name: &str) -> bool {
-	name.ends_with("._ds") || name.ends_with(".wav")
+	name.ends_with("._DS") || name.ends_with(".WAV")
 }
