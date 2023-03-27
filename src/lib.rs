@@ -6,11 +6,17 @@ use std::io::{Read, Write};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{PathBuf, Path};
 
-use windows::Win32::Storage::FileSystem::{SetFilePointer, FILE_NAME, SET_FILE_POINTER_MOVE_METHOD, GetFinalPathNameByHandleW};
-use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::core::HRESULT;
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Foundation::{HINSTANCE, BOOL, TRUE, FALSE};
+use windows::Win32::{
+	Foundation::{BOOL, FALSE, HANDLE, HINSTANCE, TRUE},
+	Storage::FileSystem::{
+		GetFinalPathNameByHandleW,
+		SetFilePointer,
+		FILE_NAME,
+		SET_FILE_POINTER_MOVE_METHOD,
+	},
+	System::LibraryLoader::GetModuleFileNameW
+};
 
 #[no_mangle]
 #[allow(non_snake_case)]
