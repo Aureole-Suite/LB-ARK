@@ -75,13 +75,15 @@ Addrs! {
 
 impl Addrs {
 	fn get(name: &str) -> Option<Addrs> {
-		match name {
-			"ed6_win3_dx9" => Some(Addrs {
-				read_from_file: 0x004A4DD0,
-				dir_entries:    0x00992DC0,
-			}),
-			_ => None,
-		}
+		Some(match name {
+			"ed6_win"      => Addrs { read_from_file: 0x004B2500, dir_entries: 0x007DB570, },
+			"ed6_win_dx9"  => Addrs { read_from_file: 0x00478770, dir_entries: 0x0079B010, },
+			"ed6_win2"     => Addrs { read_from_file: 0x004CA9D0, dir_entries: 0x0082FAC0, },
+			"ed6_win2_dx9" => Addrs { read_from_file: 0x00498B30, dir_entries: 0x007FA730, },
+			"ed6_win3"     => Addrs { read_from_file: 0x004D5DC0, dir_entries: 0x009C7100, },
+			"ed6_win3_dx9" => Addrs { read_from_file: 0x004A4DD0, dir_entries: 0x00992DC0, },
+			_ => return None,
+		})
 	}
 }
 
