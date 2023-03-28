@@ -1,6 +1,7 @@
 #![feature(abi_thiscall)]
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::os::windows::ffi::OsStringExt;
@@ -70,25 +71,27 @@ macro_rules! Addrs {
 
 Addrs! {
 	read_from_file: extern "thiscall" fn(*const HANDLE, *mut u8, usize) -> usize,
-	dir_entries: &[&[DirEntry; 4096]; 64],
+	read_dir_files: extern "C" fn(),
+	dir_entries: &[Option<&[Cell<DirEntry>; 4096]>; 64],
+	dir_n_entries: &[usize; 64],
 }
 
 impl Addrs {
 	fn get(name: &str) -> Option<Addrs> {
 		Some(match name {
-			"ed6_win"      => Addrs { read_from_file: 0x004B2500, dir_entries: 0x007DB570, },
-			"ed6_win_dx9"  => Addrs { read_from_file: 0x00478770, dir_entries: 0x0079B010, },
-			"ed6_win2"     => Addrs { read_from_file: 0x004CA9D0, dir_entries: 0x0082FAC0, },
-			"ed6_win2_dx9" => Addrs { read_from_file: 0x00498B30, dir_entries: 0x007FA730, },
-			"ed6_win3"     => Addrs { read_from_file: 0x004D6DC0, dir_entries: 0x009C7100, },
-			"ed6_win3_dx9" => Addrs { read_from_file: 0x004A4DD0, dir_entries: 0x00992DC0, },
+			"ed6_win"      => Addrs { read_from_file: 0x004B2500, read_dir_files: 0x0, dir_entries: 0x007DB570, dir_n_entries: 0x0 },
+			"ed6_win_dx9"  => Addrs { read_from_file: 0x00478770, read_dir_files: 0x0, dir_entries: 0x0079B010, dir_n_entries: 0x0 },
+			"ed6_win2"     => Addrs { read_from_file: 0x004CA9D0, read_dir_files: 0x0, dir_entries: 0x0082FAC0, dir_n_entries: 0x0 },
+			"ed6_win2_dx9" => Addrs { read_from_file: 0x00498B30, read_dir_files: 0x0, dir_entries: 0x007FA730, dir_n_entries: 0x0 },
+			"ed6_win3"     => Addrs { read_from_file: 0x004D6DC0, read_dir_files: 0x0, dir_entries: 0x009C7100, dir_n_entries: 0x0 },
+			"ed6_win3_dx9" => Addrs { read_from_file: 0x004A4DD0, read_dir_files: 0x004A3080, dir_entries: 0x00992DC0, dir_n_entries: 0x009928C0 },
 			_ => return None,
 		})
 	}
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct DirEntry {
 	name: [u8; 12],
 	unk1: u32,
@@ -99,9 +102,19 @@ struct DirEntry {
 	offset: usize,
 }
 
+impl std::fmt::Debug for DirEntry {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		self.name().fmt(f)
+	}
+}
+
 impl DirEntry {
 	fn name(&self) -> Cow<str> {
-		String::from_utf8_lossy(&self.name)
+		if self.name == [0; 12] {
+			"".into()
+		} else {
+			String::from_utf8_lossy(&self.name)
+		}
 	}
 }
 
@@ -109,15 +122,26 @@ mod hooks {
 	use retour::static_detour;
 	static_detour! {
 		pub static read_from_file: unsafe extern "thiscall" fn(*const super::HANDLE, *mut u8, usize) -> usize;
+		pub static read_dir_files: unsafe extern "C" fn();
 	}
 }
 
 fn init() -> anyhow::Result<()> {
 	unsafe {
 		hooks::read_from_file.initialize(ADDRS.read_from_file(), read_from_file)?.enable()?;
+		hooks::read_dir_files.initialize(ADDRS.read_dir_files(), read_dir_files)?.enable()?;
 	}
 
 	Ok(())
+}
+
+fn read_dir_files() {
+	unsafe {
+		hooks::read_dir_files.call();
+	}
+	for (a, n) in ADDRS.dir_entries().iter().zip(ADDRS.dir_n_entries()) {
+		println!("{n} {:?}", a.map(|a| a.iter().map(|a| a.get()).collect::<Vec<_>>()));
+	}
 }
 
 fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
@@ -133,20 +157,21 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 			SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
 		} as usize;
 
-		let index = ADDRS.dir_entries()[nr].iter()
-			.position(|e| e.offset == pos && e.csize == len);
+		let entry = ADDRS.dir_entries()[nr].unwrap().iter()
+			.map(|a| a.get())
+			.enumerate()
+			.find(|(_, e)| e.offset == pos && e.csize == len);
 
-		if let Some(index) = index {
-			let raw_name = ADDRS.dir_entries()[nr][index].name();
+		if let Some((_, entry)) = entry {
 			let data_dir = path.parent().unwrap().join("data");
 			let dir = data_dir.join(format!("ED6_DT{nr:02X}"));
 
 			for path in [
-				dir.join(normalize_name(&raw_name)),
-				dir.join(&*raw_name),
+				dir.join(normalize_name(&entry.name())),
+				dir.join(&*entry.name()),
 			] {
 				if path.exists() {
-					if is_raw(&raw_name) {
+					if is_raw(&entry.name()) {
 						let mut f = std::fs::File::open(path).unwrap();
 						let buf = unsafe { std::slice::from_raw_parts_mut(buf, len) };
 						f.read_exact(buf).unwrap();
