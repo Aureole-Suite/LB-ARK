@@ -187,8 +187,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 			.find(|(_, e)| e.offset == pos && e.csize == len);
 
 		if let Some((_, entry)) = entry {
-			let data_dir = path.parent().unwrap().join("data");
-			let dir = data_dir.join(format!("ED6_DT{nr:02X}"));
+			let dir = data_dir(nr);
 
 			for path in [
 				dir.join(normalize_name(&entry.name())),
@@ -215,6 +214,10 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 	unsafe {
 		hooks::read_from_file.call(handle, buf, len)
 	}
+}
+
+fn data_dir(nr: usize) -> PathBuf {
+	EXE_PATH.parent().unwrap().join(format!("data/ED6_DT{nr:02X}"))
 }
 
 fn parse_archive_nr(path: &Path) -> Option<usize> {
