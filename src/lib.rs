@@ -70,8 +70,6 @@ macro_rules! Addrs {
 }
 
 Addrs! {
-	read_from_file: extern "thiscall" fn(*const HANDLE, *mut u8, usize) -> usize,
-	read_dir_files: extern "C" fn(),
 	dir_entries: &[Cell<Option<&[DirEntry; 4096]>>; 64],
 	dir_n_entries: &[Cell<usize>; 64],
 }
@@ -101,19 +99,6 @@ fn scan(sig: &[Option<u8>]) -> *const u8 {
 
 impl Addrs {
 	fn get() -> Addrs {
-		let read_from_file = scan(sig! {
-			0xA1 ? ? ? ?   // mov eax, ?
-			0x83 0xEC 0x08 // sub esp, 8
-			0xA3 ? ? ? ?   // mov ?, eax
-		});
-
-		let read_dir_files = scan(sig! {
-			0x55                          // push ebp
-			0x8B 0xEC                     // mov ebp, esp
-			0x83 0xE4 0xF8                // and esp, ~7
-			0x81 0xEC 0x9C 0x02 0x00 0x00 // sub esp, 0x29C
-		});
-
 		// at the end of read_dir_files, generally at +187
 		let n = scan(sig! {
 			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
@@ -125,8 +110,6 @@ impl Addrs {
 		let dir_entries   = unsafe { *(n.add(16) as *const *const ()) };
 
 		Addrs {
-			read_from_file: read_from_file as usize,
-			read_dir_files: read_dir_files as usize,
 			dir_entries: dir_entries as usize,
 			dir_n_entries: dir_n_entries as usize,
 		}
@@ -171,8 +154,18 @@ mod hooks {
 
 fn init() -> anyhow::Result<()> {
 	unsafe {
-		hooks::read_from_file.initialize(ADDRS.read_from_file(), read_from_file)?.enable()?;
-		hooks::read_dir_files.initialize(ADDRS.read_dir_files(), read_dir_files)?.enable()?;
+		hooks::read_from_file.initialize(std::mem::transmute(scan(sig! {
+			0xA1 ? ? ? ?   // mov eax, ?
+			0x83 0xEC 0x08 // sub esp, 8
+			0xA3 ? ? ? ?   // mov ?, eax
+		})), read_from_file)?.enable()?;
+
+		hooks::read_dir_files.initialize(std::mem::transmute(scan(sig! {
+			0x55                          // push ebp
+			0x8B 0xEC                     // mov ebp, esp
+			0x83 0xE4 0xF8                // and esp, ~7
+			0x81 0xEC 0x9C 0x02 0x00 0x00 // sub esp, 0x29C
+		})), read_dir_files)?.enable()?;
 	}
 
 	Ok(())
