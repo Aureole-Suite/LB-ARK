@@ -85,27 +85,29 @@ macro_rules! sig {
 	}
 }
 
-fn find(text: &[u8], sig: &[Option<u8>]) -> usize {
+fn scan(sig: &[Option<u8>]) -> *const u8 {
+	let start = 0x00400000;
+	let data: &'static [u8] = unsafe {
+		std::slice::from_raw_parts(start as *const u8, 0x00200000)
+	};
+
 	let Some(a) = sig[0] else { panic!() };
-	memchr::memchr_iter(a, text)
-		.find(|&a| text[a..].iter().zip(sig).all(|(a,b)| b.map_or(true, |b| *a==b)))
-		.unwrap()
+	let offset = memchr::memchr_iter(a, data)
+		.find(|&a| data[a..].iter().zip(sig).all(|(a,b)| b.map_or(true, |b| *a==b)))
+		.unwrap();
+
+	(start + offset) as *const u8
 }
 
 impl Addrs {
 	fn get() -> Addrs {
-		let start = 0x00400000;
-		let data = unsafe {
-			std::slice::from_raw_parts(start as *const u8, 0x00200000)
-		};
-
-		let read_from_file = start + find(data, sig! {
+		let read_from_file = scan(sig! {
 			0xA1 ? ? ? ?   // mov eax, ?
 			0x83 0xEC 0x08 // sub esp, 8
 			0xA3 ? ? ? ?   // mov ?, eax
 		});
 
-		let read_dir_files = start + find(data, sig! {
+		let read_dir_files = scan(sig! {
 			0x55                          // push ebp
 			0x8B 0xEC                     // mov ebp, esp
 			0x83 0xE4 0xF8                // and esp, ~7
@@ -113,16 +115,21 @@ impl Addrs {
 		});
 
 		// at the end of read_dir_files, generally at +187
-		let n = find(data, sig! {
+		let n = scan(sig! {
 			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
 			0x81 0xC3 ? ? ? ?       // add ebx, ? ; 36*number of entries: 2047 in FC, 4096 in SC/3rd
 			0x89 0x04 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_entries], eax
 			0x47                    // inc edi
 		});
-		let dir_n_entries = usize::from_ne_bytes(data[n+3..][..4].try_into().unwrap());
-		let dir_entries   = usize::from_ne_bytes(data[n+16..][..4].try_into().unwrap());
+		let dir_n_entries = unsafe { *(n.add(3) as *const *const ()) };
+		let dir_entries   = unsafe { *(n.add(16) as *const *const ()) };
 
-		Addrs { read_from_file, read_dir_files, dir_entries, dir_n_entries }
+		Addrs {
+			read_from_file: read_from_file as usize,
+			read_dir_files: read_dir_files as usize,
+			dir_entries: dir_entries as usize,
+			dir_n_entries: dir_n_entries as usize,
+		}
 	}
 }
 
