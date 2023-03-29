@@ -5,18 +5,20 @@ use std::cell::Cell;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::os::windows::ffi::OsStringExt;
+use std::os::windows::prelude::OsStrExt;
 use std::path::{PathBuf, Path};
 
-use windows::core::HRESULT;
+use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::{
-	Foundation::{BOOL, FALSE, HANDLE, HINSTANCE, TRUE},
+	Foundation::{BOOL, HANDLE, HINSTANCE, TRUE},
 	Storage::FileSystem::{
 		GetFinalPathNameByHandleW,
 		SetFilePointer,
 		FILE_NAME,
 		SET_FILE_POINTER_MOVE_METHOD,
 	},
-	System::LibraryLoader::GetModuleFileNameW
+	System::LibraryLoader::GetModuleFileNameW,
+	UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE},
 };
 
 #[no_mangle]
@@ -26,20 +28,14 @@ pub extern "system" fn DllMain(_dll_module: HINSTANCE, reason: u32, _reserved: *
 
 	println!("LB-ARK: init for {}", EXE_PATH.file_stem().unwrap().to_string_lossy());
 
-	match init() {
-		Ok(()) => TRUE,
-		Err(e) => {
-			println!("LB-ARK: init failed: {e:?}");
-			FALSE
-		}
-	}
+	show_error(init()).is_some().into()
 }
 
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
 	// I don't think this function is ever called. If I'm wrong, oh well.
-	println!("LB-ARK: DirectXFileCreate called");
+	show_error::<()>(Err(anyhow::anyhow!("DirectXFileCreate called")));
 	std::process::abort()
 }
 
@@ -63,6 +59,7 @@ macro_rules! sig {
 	}
 }
 
+#[track_caller]
 fn scan(sig: &[Option<u8>]) -> *const u8 {
 	let start = 0x00400000;
 	let data: &'static [u8] = unsafe {
@@ -187,32 +184,40 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 			.find(|(_, e)| e.offset == pos && e.csize == len);
 
 		if let Some((_, entry)) = entry {
-			let dir = data_dir(nr);
-
-			for path in [
-				dir.join(normalize_name(&entry.name())),
-				dir.join(&*entry.name()),
-			] {
-				if path.exists() {
-					if is_raw(&entry.name()) {
-						let mut f = std::fs::File::open(path).unwrap();
-						let buf = unsafe { std::slice::from_raw_parts_mut(buf, len) };
-						f.read_exact(buf).unwrap();
-						return len
-					} else {
-						let data = std::fs::read(path).unwrap();
-						let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
-						let mut f = std::io::Cursor::new(buf);
-						fake_compress(&mut f, &data).unwrap();
-						return f.position() as usize
-					}
-				}
+			let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
+			if let Some(v) = show_error(do_read(nr, &entry.name(), buf)).flatten() {
+				return v
 			}
 		}
 	}
 
 	unsafe {
 		hooks::read_from_file.call(handle, buf, len)
+	}
+}
+
+fn msgbox(title: &str, body: &str, style: u32) -> u32 {
+	let mut title = OsString::from(title).encode_wide().collect::<Vec<_>>();
+	let mut body = OsString::from(body).encode_wide().collect::<Vec<_>>();
+	title.push(0);
+	body.push(0);
+	unsafe {
+		MessageBoxW(
+			None,
+			PCWSTR::from_raw(body.as_ptr()),
+			PCWSTR::from_raw(title.as_ptr()),
+			MESSAGEBOX_STYLE(style)
+		).0 as u32
+	}
+}
+
+fn show_error<T>(a: anyhow::Result<T>) -> Option<T> {
+	match a {
+		Ok(v) => Some(v),
+		Err(e) => {
+			msgbox("LB-ARK error", &format!("{e:?}"), 0x10);
+			None
+		}
 	}
 }
 
@@ -224,6 +229,31 @@ fn parse_archive_nr(path: &Path) -> Option<usize> {
 	let name = path.file_name()?.to_str()?;
 	let name = name.strip_prefix("ED6_DT")?.strip_suffix(".dat")?;
 	usize::from_str_radix(name, 16).ok()
+}
+
+fn do_read(nr: usize, name: &str, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
+	let dir = data_dir(nr);
+
+	for path in [
+		dir.join(normalize_name(name)),
+		dir.join(name),
+	] {
+		if path.exists() {
+			if is_raw(name) {
+				let mut f = std::fs::File::open(path)?;
+				let len = f.metadata()?.len() as usize;
+				f.read_exact(&mut buf[..len])?;
+				return Ok(Some(len))
+			} else {
+				let data = std::fs::read(path)?;
+				let mut f = std::io::Cursor::new(buf);
+				fake_compress(&mut f, &data)?;
+				return Ok(Some(f.position() as usize))
+			}
+		}
+	}
+
+	Ok(None)
 }
 
 fn fake_compress(buf: &mut impl Write, data: &[u8]) -> anyhow::Result<()> {
