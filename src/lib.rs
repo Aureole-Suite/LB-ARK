@@ -73,7 +73,7 @@ Addrs! {
 	read_from_file: extern "thiscall" fn(*const HANDLE, *mut u8, usize) -> usize,
 	read_dir_files: extern "C" fn(),
 	dir_entries: &[Cell<Option<&[DirEntry; 4096]>>; 64],
-	dir_n_entries: &[usize; 64],
+	dir_n_entries: &[Cell<usize>; 64],
 }
 
 macro_rules! sig {
@@ -183,7 +183,7 @@ fn read_dir_files() {
 		hooks::read_dir_files.call();
 	}
 	for (a, n) in ADDRS.dir_entries().iter().zip(ADDRS.dir_n_entries()) {
-		println!("{n} {:?}", a.get());
+		println!("{} {:?}", n.get(), a.get());
 	}
 }
 
