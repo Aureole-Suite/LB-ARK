@@ -53,25 +53,6 @@ lazy_static::lazy_static! {
 		let name = Path::new(&path).file_stem().unwrap().to_str().unwrap();
 		Box::leak(name.to_lowercase().into_boxed_str())
 	};
-	static ref ADDRS: Addrs = Addrs::get();
-}
-
-macro_rules! Addrs {
-	($($k:ident: $ty:ty),* $(,)?) => {
-		#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-		struct Addrs {
-			$($k: usize,)*
-		}
-
-		impl Addrs {
-			$(fn $k(&self) -> $ty { unsafe { std::mem::transmute(self.$k) } })*
-		}
-	}
-}
-
-Addrs! {
-	dir_entries: &[Cell<Option<&[DirEntry; 4096]>>; 64],
-	dir_n_entries: &[Cell<usize>; 64],
 }
 
 macro_rules! sig {
@@ -95,25 +76,6 @@ fn scan(sig: &[Option<u8>]) -> *const u8 {
 		.unwrap();
 
 	(start + offset) as *const u8
-}
-
-impl Addrs {
-	fn get() -> Addrs {
-		// at the end of read_dir_files, generally at +187
-		let n = scan(sig! {
-			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
-			0x81 0xC3 ? ? ? ?       // add ebx, ? ; 36*number of entries: 2047 in FC, 4096 in SC/3rd
-			0x89 0x04 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_entries], eax
-			0x47                    // inc edi
-		});
-		let dir_n_entries = unsafe { *(n.add(3) as *const *const ()) };
-		let dir_entries   = unsafe { *(n.add(16) as *const *const ()) };
-
-		Addrs {
-			dir_entries: dir_entries as usize,
-			dir_n_entries: dir_n_entries as usize,
-		}
-	}
 }
 
 #[repr(C)]
@@ -171,12 +133,40 @@ fn init() -> anyhow::Result<()> {
 	Ok(())
 }
 
+fn dir_entries_raw() -> (
+	&'static [Cell<*const DirEntry>; 64],
+	&'static [Cell<usize>; 64],
+) {
+	lazy_static::lazy_static! {
+		static ref N: usize = scan(sig! {
+			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
+			0x81 0xC3 ? ? ? ?       // add ebx, ? ; 36*number of entries: 2047 in FC, 4096 in SC/3rd
+			0x89 0x04 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_entries], eax
+			0x47                    // inc edi
+		}) as usize;
+	}
+	let lens = unsafe { &**((*N+3) as *const *const _) };
+	let ptrs = unsafe { &**((*N+16) as *const *const _) };
+	(ptrs, lens)
+}
+
+fn dir_entries() -> [Option<&'static [DirEntry]>; 64] {
+	let (ptrs, lens) = dir_entries_raw();
+	let mut x = [None; 64];
+	for i in 0..64 {
+		if !ptrs[i].get().is_null() {
+			x[i] = Some(unsafe { std::slice::from_raw_parts(ptrs[i].get(), lens[i].get()) });
+		}
+	}
+	x
+}
+
 fn read_dir_files() {
 	unsafe {
 		hooks::read_dir_files.call();
 	}
-	for (a, n) in ADDRS.dir_entries().iter().zip(ADDRS.dir_n_entries()) {
-		println!("{} {:?}", n.get(), a.get());
+	for (n, a) in dir_entries().iter().enumerate() {
+		println!("ED6_DT{n:02X} {:?}", a);
 	}
 }
 
@@ -193,7 +183,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 			SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
 		} as usize;
 
-		let entry = ADDRS.dir_entries()[nr].get().unwrap().iter()
+		let entry = dir_entries()[nr].unwrap().iter()
 			.enumerate()
 			.find(|(_, e)| e.offset == pos && e.csize == len);
 
