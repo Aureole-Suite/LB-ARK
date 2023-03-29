@@ -12,3 +12,4 @@ windows = { version = "0.46.0", features = ["Win32_Foundation", "Win32_System_Li
 retour = "0.1.0"
 anyhow = "1.0.70"
 lazy_static = "1.4.0"
+memchr = "2.5.0"

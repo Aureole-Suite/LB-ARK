@@ -53,7 +53,7 @@ lazy_static::lazy_static! {
 		let name = Path::new(&path).file_stem().unwrap().to_str().unwrap();
 		Box::leak(name.to_lowercase().into_boxed_str())
 	};
-	static ref ADDRS: Addrs = Addrs::get(*NAME).expect("exe not supported");
+	static ref ADDRS: Addrs = Addrs::get();
 }
 
 macro_rules! Addrs {
@@ -76,17 +76,53 @@ Addrs! {
 	dir_n_entries: &[usize; 64],
 }
 
+macro_rules! sig {
+	(@unit ?) => { None };
+	(@unit $a:literal) => { Some($a) };
+	(@unit $($t:tt)*) => { compile_error!(stringify!($($t)*)) };
+	($($a:tt)*) => {
+		&[$(sig!(@unit $a)),*]
+	}
+}
+
+fn find(text: &[u8], sig: &[Option<u8>]) -> usize {
+	let Some(a) = sig[0] else { panic!() };
+	memchr::memchr_iter(a, text)
+		.find(|&a| text[a..].iter().zip(sig).all(|(a,b)| b.map_or(true, |b| *a==b)))
+		.unwrap()
+}
+
 impl Addrs {
-	fn get(name: &str) -> Option<Addrs> {
-		Some(match name {
-			"ed6_win"      => Addrs { read_from_file: 0x004B2500, read_dir_files: 0x0, dir_entries: 0x007DB570, dir_n_entries: 0x0 },
-			"ed6_win_dx9"  => Addrs { read_from_file: 0x00478770, read_dir_files: 0x0, dir_entries: 0x0079B010, dir_n_entries: 0x0 },
-			"ed6_win2"     => Addrs { read_from_file: 0x004CA9D0, read_dir_files: 0x0, dir_entries: 0x0082FAC0, dir_n_entries: 0x0 },
-			"ed6_win2_dx9" => Addrs { read_from_file: 0x00498B30, read_dir_files: 0x0, dir_entries: 0x007FA730, dir_n_entries: 0x0 },
-			"ed6_win3"     => Addrs { read_from_file: 0x004D6DC0, read_dir_files: 0x0, dir_entries: 0x009C7100, dir_n_entries: 0x0 },
-			"ed6_win3_dx9" => Addrs { read_from_file: 0x004A4DD0, read_dir_files: 0x004A3080, dir_entries: 0x00992DC0, dir_n_entries: 0x009928C0 },
-			_ => return None,
-		})
+	fn get() -> Addrs {
+		let start = 0x00400000;
+		let data = unsafe {
+			std::slice::from_raw_parts(start as *const u8, 0x00200000)
+		};
+
+		let read_from_file = start + find(data, sig! {
+			0xA1 ? ? ? ?   // mov eax, ?
+			0x83 0xEC 0x08 // sub esp, 8
+			0xA3 ? ? ? ?   // mov ?, eax
+		});
+
+		let read_dir_files = start + find(data, sig! {
+			0x55                          // push ebp
+			0x8B 0xEC                     // mov ebp, esp
+			0x83 0xE4 0xF8                // and esp, ~7
+			0x81 0xEC 0x9C 0x02 0x00 0x00 // sub esp, 0x29C
+		});
+
+		// at the end of read_dir_files, generally at +187
+		let n = find(data, sig! {
+			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
+			0x81 0xC3 ? ? ? ?       // add ebx, ? ; 36*number of entries: 2047 in FC, 4096 in SC/3rd
+			0x89 0x04 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_entries], eax
+			0x47                    // inc edi
+		});
+		let dir_n_entries = usize::from_ne_bytes(data[n+3..][..4].try_into().unwrap());
+		let dir_entries   = usize::from_ne_bytes(data[n+16..][..4].try_into().unwrap());
+
+		Addrs { read_from_file, read_dir_files, dir_entries, dir_n_entries }
 	}
 }
 
