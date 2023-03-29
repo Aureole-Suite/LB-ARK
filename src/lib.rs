@@ -24,7 +24,7 @@ use windows::Win32::{
 pub extern "system" fn DllMain(_dll_module: HINSTANCE, reason: u32, _reserved: *const ()) -> BOOL {
 	if reason != 1 /* DLL_PROCESS_ATTACH */ { return TRUE }
 
-	println!("LB-ARK: init for {}", *NAME);
+	println!("LB-ARK: init for {}", EXE_PATH.file_stem().unwrap().to_string_lossy());
 
 	match init() {
 		Ok(()) => TRUE,
@@ -44,14 +44,13 @@ pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
 }
 
 lazy_static::lazy_static! {
-	static ref NAME: &'static str = {
+	static ref EXE_PATH: PathBuf = {
 		let mut path = [0; 260];
 		let n = unsafe {
 			GetModuleFileNameW(HINSTANCE(0), &mut path)
 		};
 		let path = OsString::from_wide(&path[..n as usize]);
-		let name = Path::new(&path).file_stem().unwrap().to_str().unwrap();
-		Box::leak(name.to_lowercase().into_boxed_str())
+		PathBuf::from(path)
 	};
 }
 
