@@ -55,6 +55,7 @@ pub struct Dirs {
 unsafe impl Send for Dirs {}
 
 impl Dirs {
+	#[allow(clippy::missing_safety_doc)] // I don't care
 	pub unsafe fn new() -> Dirs {
 		let n = crate::sigscan::sigscan! {
 			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
@@ -122,7 +123,6 @@ impl Dirs {
 			}
 		}
 
-		let idx = idx as usize;
 		while entries.len() <= idx {
 			entries.push(Entry::default());
 		}
