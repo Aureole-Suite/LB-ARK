@@ -263,14 +263,12 @@ fn read_file(path: &Path, buf: &mut [u8]) -> anyhow::Result<usize> {
 		f.read_exact(&mut buf[..len])?;
 		len
 	} else {
-		let data = std::fs::read(path)?;
-		let mut f = std::io::Cursor::new(buf);
-		fake_compress(&mut f, &data)?;
-		f.position() as usize
+		fake_compress(buf, &std::fs::read(path)?)?
 	}, "failed to read {}", rel(path).display())
 }
 
-fn fake_compress(buf: &mut impl Write, data: &[u8]) -> anyhow::Result<()> {
+fn fake_compress(buf: &mut [u8], data: &[u8]) -> anyhow::Result<usize> {
+	let mut buf = std::io::Cursor::new(buf);
 	let mut chunks = data.chunks(0x1FFF).peekable();
 	// include an empty chunk, because otherwise it'll just read uninitialized data
 	buf.write_all(&u16::to_le_bytes(2))?;
@@ -282,7 +280,7 @@ fn fake_compress(buf: &mut impl Write, data: &[u8]) -> anyhow::Result<()> {
 		buf.write_all(chunk)?;
 		buf.write_all(&[chunks.peek().is_some().into()])?;
 	}
-	Ok(())
+	Ok(buf.position() as usize)
 }
 
 pub fn normalize_name(name: &str) -> String {
