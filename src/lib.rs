@@ -1,6 +1,7 @@
 #![feature(abi_thiscall)]
 #![feature(once_cell)]
 #![feature(decl_macro)]
+#![feature(try_blocks)]
 
 use std::ffi::OsString;
 use std::io::{Read, Write, BufReader, BufRead};
@@ -25,7 +26,7 @@ pub mod sigscan;
 pub mod dir;
 
 use sigscan::sigscan;
-use dir::DIRS;
+use dir::{DIRS, Entry};
 
 #[no_mangle]
 #[allow(non_snake_case)]
@@ -141,20 +142,30 @@ fn show_error<T>(a: anyhow::Result<T>) -> Option<T> {
 	match a {
 		Ok(v) => Some(v),
 		Err(e) => {
-			msgbox("LB-ARK error", &format!("{e:?}"), 0x10);
+			let s = format!("{e:#}");
+			println!("{:?}", e.context("LB-ARK error"));
+			msgbox("LB-ARK error", &s, 0x10);
 			None
 		}
 	}
 }
 
 fn data_dir(nr: usize) -> PathBuf {
-	EXE_PATH.parent().unwrap().join(format!("data/ED6_DT{nr:02X}"))
+	EXE_PATH.parent().unwrap().join(format!("data\\ED6_DT{nr:02X}"))
+}
+
+fn rel(path: &Path) -> &Path {
+	path.strip_prefix(EXE_PATH.parent().unwrap()).unwrap()
 }
 
 fn parse_archive_nr(path: &Path) -> Option<usize> {
 	let name = path.file_name()?.to_str()?;
 	let name = name.strip_prefix("ED6_DT")?.strip_suffix(".dat")?;
 	usize::from_str_radix(name, 16).ok()
+}
+
+macro c($e:expr, $($a:tt)*) {
+	<anyhow::Result<_> as anyhow::Context<_, _>>::with_context(try { $e }, || format!($($a)*))
 }
 
 fn do_load_dir() -> anyhow::Result<()> {
@@ -168,54 +179,95 @@ fn do_load_dir() -> anyhow::Result<()> {
 					continue
 				}
 
-				for (n, line) in BufReader::new(std::fs::File::open(path)?).lines().enumerate() {
-					parse_dir_line(nr, &line?)?;
+				for (n, line) in BufReader::new(std::fs::File::open(&path)?).lines().enumerate() {
+					show_error(c!({
+						parse_dir_line(nr, &line?)?
+					}, "{}, line {}", rel(&path).display(), n+1));
 				}
 			}
 		}
 	}
-	for (n, a) in DIRS.lock().unwrap().entries().iter().enumerate() {
-		println!("ED6_DT{n:02X} {:?}", a);
-	}
 	Ok(())
 }
 
-fn parse_dir_line(nr: usize, line: &str) -> anyhow::Result<()> {
-	if line.trim().is_empty() {
+fn parse_dir_line(arc: usize, line: &str) -> anyhow::Result<()> {
+	let (line, _) = line.split_once('#').unwrap_or((line, ""));
+	let line = line.trim();
+	if line.is_empty() {
 		return Ok(())
 	}
 
-	let (n, name) = line.split_once(' ').ok_or_else(|| anyhow::anyhow!("no space in line"))?;
-	let n = n.parse::<u16>()? as usize;
+	let Some((n, name)) = line.split_once(' ')
+		.or_else(|| line.split_once('\t'))
+		else {
+			anyhow::bail!("no space in line")
+		};
 
+	let n = if let Some(s) = n.strip_prefix("0x") {
+		u16::from_str_radix(s, 16)?
+	} else {
+		n.parse::<u16>()?
+	};
+
+	let name = name.trim();
+
+	let mut dirs = DIRS.lock().unwrap();
+	let entry = dirs.get(arc as u8, n);
+	if entry.name != Entry::default().name {
+		let prev = path_of(entry).map_or_else(|| entry.name(), |n| n.into());
+		anyhow::bail!("index {n} is already used by {}", prev);
+	}
+
+	entry.name = unnormalize_name(name).unwrap_or(*b"98_invalid__");
+	entry.offset = 0;
+	entry.csize = n as usize;
+	entry.asize = 888888888;
+	entry.unk1 = Box::leak(name.to_owned().into_boxed_str()).as_ptr() as usize as u32;
+	entry.unk2 = name.len() as u32;
 
 	Ok(())
 }
 
-fn do_read(nr: usize, name: &dir::Entry, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
-	let dir = data_dir(nr);
-	let name = &*name.name();
+fn path_of(e: &Entry) -> Option<&str> {
+	if e.offset == 0 && e.asize == 888888888 {
+		Some(unsafe {
+			let ptr = e.unk1 as usize as *const u8;
+			let slice = std::slice::from_raw_parts(ptr, e.unk2 as usize);
+			std::str::from_utf8_unchecked(slice)
+		})
+	} else {
+		None
+	}
+}
 
-	for path in [
-		dir.join(normalize_name(name)),
-		dir.join(name),
-	] {
+fn do_read(nr: usize, entry: &Entry, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
+	if let Some(path) = path_of(entry) {
+		let path = data_dir(nr).join(path);
+		Ok(Some(read_file(&path, buf)?))
+	} else {
+		let path = data_dir(nr).join(normalize_name(&entry.name()));
 		if path.exists() {
-			if is_raw(name) {
-				let mut f = std::fs::File::open(path)?;
-				let len = f.metadata()?.len() as usize;
-				f.read_exact(&mut buf[..len])?;
-				return Ok(Some(len))
-			} else {
-				let data = std::fs::read(path)?;
-				let mut f = std::io::Cursor::new(buf);
-				fake_compress(&mut f, &data)?;
-				return Ok(Some(f.position() as usize))
-			}
+			Ok(Some(read_file(&path, buf)?))
+		} else {
+			Ok(None)
 		}
 	}
+}
 
-	Ok(None)
+fn read_file(path: &Path, buf: &mut [u8]) -> anyhow::Result<usize> {
+	let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
+	let is_raw = ext.map_or(false, |e| e == "_ds" || e == "wav");
+	c!(if is_raw {
+		let mut f = std::fs::File::open(path)?;
+		let len = f.metadata()?.len() as usize;
+		f.read_exact(&mut buf[..len])?;
+		len
+	} else {
+		let data = std::fs::read(path)?;
+		let mut f = std::io::Cursor::new(buf);
+		fake_compress(&mut f, &data)?;
+		f.position() as usize
+	}, "failed to read {}", rel(path).display())
 }
 
 fn fake_compress(buf: &mut impl Write, data: &[u8]) -> anyhow::Result<()> {
@@ -226,7 +278,7 @@ fn fake_compress(buf: &mut impl Write, data: &[u8]) -> anyhow::Result<()> {
 	while let Some(chunk) = chunks.next() {
 		let len = chunk.len() as u16;
 		buf.write_all(&u16::to_le_bytes(len + 4))?;
-		buf.write_all(&u16::to_be_bytes(len | 0x2000))?; 
+		buf.write_all(&u16::to_be_bytes(len | 0x2000))?;
 		buf.write_all(chunk)?;
 		buf.write_all(&[chunks.peek().is_some().into()])?;
 	}
@@ -242,6 +294,13 @@ pub fn normalize_name(name: &str) -> String {
 	}
 }
 
-pub fn is_raw(name: &str) -> bool {
-	name.ends_with("._DS") || name.ends_with(".WAV")
+pub fn unnormalize_name(name: &str) -> Option<[u8; 12]> {
+	let (_, name) = name.rsplit_once(['/', '\\']).unwrap_or(("", name));
+	let name = name.to_uppercase();
+	let (name, ext) = name.split_once('.').unwrap_or((&name, ""));
+	if name.len() > 8 || ext.len() > 3 { return None; }
+	let mut o = *b"        .   ";
+	o[..name.len()].copy_from_slice(name.as_bytes());
+	o[9..][..ext.len()].copy_from_slice(ext.as_bytes());
+	Some(o)
 }
