@@ -111,7 +111,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 
 		if let Some((_, entry)) = entry {
 			let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
-			if let Some(v) = show_error(do_read(nr, &entry.name(), buf)).flatten() {
+			if let Some(v) = show_error(do_read(nr, entry, buf)).flatten() {
 				return v
 			}
 		}
@@ -192,8 +192,9 @@ fn parse_dir_line(nr: usize, line: &str) -> anyhow::Result<()> {
 	Ok(())
 }
 
-fn do_read(nr: usize, name: &str, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
+fn do_read(nr: usize, name: &dir::Entry, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
 	let dir = data_dir(nr);
+	let name = &*name.name();
 
 	for path in [
 		dir.join(normalize_name(name)),
