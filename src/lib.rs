@@ -1,9 +1,9 @@
 #![feature(abi_thiscall)]
+#![feature(once_cell)]
+#![feature(decl_macro)]
 
-use std::borrow::Cow;
-use std::cell::Cell;
 use std::ffi::OsString;
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufReader, BufRead};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::prelude::OsStrExt;
 use std::path::{PathBuf, Path};
@@ -20,6 +20,12 @@ use windows::Win32::{
 	System::LibraryLoader::GetModuleFileNameW,
 	UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE},
 };
+
+pub mod sigscan;
+pub mod dir;
+
+use sigscan::sigscan;
+use dir::DIRS;
 
 #[no_mangle]
 #[allow(non_snake_case)]
@@ -50,58 +56,6 @@ lazy_static::lazy_static! {
 	};
 }
 
-macro_rules! sig {
-	(@unit ?) => { None };
-	(@unit $a:literal) => { Some($a) };
-	(@unit $($t:tt)*) => { compile_error!(stringify!($($t)*)) };
-	($($a:tt)*) => {
-		&[$(sig!(@unit $a)),*]
-	}
-}
-
-#[track_caller]
-fn scan(sig: &[Option<u8>]) -> *const u8 {
-	let start = 0x00400000;
-	let data: &'static [u8] = unsafe {
-		std::slice::from_raw_parts(start as *const u8, 0x00200000)
-	};
-
-	let Some(a) = sig[0] else { panic!() };
-	let offset = memchr::memchr_iter(a, data)
-		.find(|&a| data[a..].iter().zip(sig).all(|(a,b)| b.map_or(true, |b| *a==b)))
-		.unwrap();
-
-	(start + offset) as *const u8
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct DirEntry {
-	name: [u8; 12],
-	unk1: u32,
-	csize: usize,
-	unk2: u32,
-	asize: usize,
-	ts: u32,
-	offset: usize,
-}
-
-impl std::fmt::Debug for DirEntry {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		self.name().fmt(f)
-	}
-}
-
-impl DirEntry {
-	fn name(&self) -> Cow<str> {
-		if self.name == [0; 12] {
-			"".into()
-		} else {
-			String::from_utf8_lossy(&self.name)
-		}
-	}
-}
-
 mod hooks {
 	use retour::static_detour;
 	static_detour! {
@@ -112,58 +66,29 @@ mod hooks {
 
 fn init() -> anyhow::Result<()> {
 	unsafe {
-		hooks::read_from_file.initialize(std::mem::transmute(scan(sig! {
+		hooks::read_from_file.initialize(std::mem::transmute(sigscan! {
 			0xA1 ? ? ? ?   // mov eax, ?
 			0x83 0xEC 0x08 // sub esp, 8
 			0xA3 ? ? ? ?   // mov ?, eax
-		})), read_from_file)?.enable()?;
+		}), read_from_file)?.enable()?;
 
-		hooks::read_dir_files.initialize(std::mem::transmute(scan(sig! {
+		hooks::read_dir_files.initialize(std::mem::transmute(sigscan! {
 			0x55                          // push ebp
 			0x8B 0xEC                     // mov ebp, esp
 			0x83 0xE4 0xF8                // and esp, ~7
 			0x81 0xEC 0x9C 0x02 0x00 0x00 // sub esp, 0x29C
-		})), read_dir_files)?.enable()?;
+		}), read_dir_files)?.enable()?;
 	}
 
 	Ok(())
-}
-
-fn dir_entries_raw() -> (
-	&'static [Cell<*const DirEntry>; 64],
-	&'static [Cell<usize>; 64],
-) {
-	lazy_static::lazy_static! {
-		static ref N: usize = scan(sig! {
-			0x89 0x34 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_n_entries], esi
-			0x81 0xC3 ? ? ? ?       // add ebx, ? ; 36*number of entries: 2047 in FC, 4096 in SC/3rd
-			0x89 0x04 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_entries], eax
-			0x47                    // inc edi
-		}) as usize;
-	}
-	let lens = unsafe { &**((*N+3) as *const *const _) };
-	let ptrs = unsafe { &**((*N+16) as *const *const _) };
-	(ptrs, lens)
-}
-
-fn dir_entries() -> [Option<&'static [DirEntry]>; 64] {
-	let (ptrs, lens) = dir_entries_raw();
-	let mut x = [None; 64];
-	for i in 0..64 {
-		if !ptrs[i].get().is_null() {
-			x[i] = Some(unsafe { std::slice::from_raw_parts(ptrs[i].get(), lens[i].get()) });
-		}
-	}
-	x
 }
 
 fn read_dir_files() {
 	unsafe {
 		hooks::read_dir_files.call();
 	}
-	for (n, a) in dir_entries().iter().enumerate() {
-		println!("ED6_DT{n:02X} {:?}", a);
-	}
+
+	show_error(do_load_dir());
 }
 
 fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
@@ -179,7 +104,8 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 			SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
 		} as usize;
 
-		let entry = dir_entries()[nr].unwrap().iter()
+		let dirs = DIRS.lock().unwrap();
+		let entry = dirs.entries()[nr].iter()
 			.enumerate()
 			.find(|(_, e)| e.offset == pos && e.csize == len);
 
@@ -229,6 +155,41 @@ fn parse_archive_nr(path: &Path) -> Option<usize> {
 	let name = path.file_name()?.to_str()?;
 	let name = name.strip_prefix("ED6_DT")?.strip_suffix(".dat")?;
 	usize::from_str_radix(name, 16).ok()
+}
+
+fn do_load_dir() -> anyhow::Result<()> {
+	for nr in 0..64 {
+		let dir = data_dir(nr);
+		if dir.is_dir() {
+			for f in dir.read_dir()? {
+				let path = f?.path();
+				let ext = path.extension().and_then(|a| a.to_str());
+				if ext.map_or(true, |a| a.to_lowercase() != "dir") {
+					continue
+				}
+
+				for (n, line) in BufReader::new(std::fs::File::open(path)?).lines().enumerate() {
+					parse_dir_line(nr, &line?)?;
+				}
+			}
+		}
+	}
+	for (n, a) in DIRS.lock().unwrap().entries().iter().enumerate() {
+		println!("ED6_DT{n:02X} {:?}", a);
+	}
+	Ok(())
+}
+
+fn parse_dir_line(nr: usize, line: &str) -> anyhow::Result<()> {
+	if line.trim().is_empty() {
+		return Ok(())
+	}
+
+	let (n, name) = line.split_once(' ').ok_or_else(|| anyhow::anyhow!("no space in line"))?;
+	let n = n.parse::<u16>()? as usize;
+
+
+	Ok(())
 }
 
 fn do_read(nr: usize, name: &str, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
