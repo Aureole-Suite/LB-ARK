@@ -4,7 +4,7 @@
 #![feature(try_blocks)]
 
 use std::ffi::OsString;
-use std::io::{Read, Write, BufReader, BufRead};
+use std::io::{BufReader, BufRead};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::prelude::OsStrExt;
 use std::path::{PathBuf, Path};
@@ -257,30 +257,33 @@ fn do_read(nr: usize, entry: &Entry, buf: &mut [u8]) -> anyhow::Result<Option<us
 fn read_file(path: &Path, buf: &mut [u8]) -> anyhow::Result<usize> {
 	let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
 	let is_raw = ext.map_or(false, |e| e == "_ds" || e == "wav");
-	c!(if is_raw {
-		let mut f = std::fs::File::open(path)?;
-		let len = f.metadata()?.len() as usize;
-		f.read_exact(&mut buf[..len])?;
-		len
+	let data = c!(std::fs::read(path)?, "failed to read {}", rel(path).display())?;
+	Ok(if is_raw {
+		buf[..data.len()].copy_from_slice(&data);
+		data.len()
 	} else {
-		fake_compress(buf, &std::fs::read(path)?)?
-	}, "failed to read {}", rel(path).display())
+		fake_compress(buf, &data)
+	})
 }
 
-fn fake_compress(buf: &mut [u8], data: &[u8]) -> anyhow::Result<usize> {
-	let mut buf = std::io::Cursor::new(buf);
+fn fake_compress(buf: &mut [u8], data: &[u8]) -> usize {
+	let mut i = 0;
+	let mut put = |y: &[u8]| {
+		buf[i..][..y.len()].copy_from_slice(y);
+		i += y.len();
+	};
 	let mut chunks = data.chunks(0x1FFF).peekable();
 	// include an empty chunk, because otherwise it'll just read uninitialized data
-	buf.write_all(&u16::to_le_bytes(2))?;
-	buf.write_all(&[chunks.peek().is_some().into()])?;
+	put(&u16::to_le_bytes(2));
+	put(&[chunks.peek().is_some().into()]);
 	while let Some(chunk) = chunks.next() {
 		let len = chunk.len() as u16;
-		buf.write_all(&u16::to_le_bytes(len + 4))?;
-		buf.write_all(&u16::to_be_bytes(len | 0x2000))?;
-		buf.write_all(chunk)?;
-		buf.write_all(&[chunks.peek().is_some().into()])?;
+		put(&u16::to_le_bytes(len + 4));
+		put(&u16::to_be_bytes(len | 0x2000));
+		put(chunk);
+		put(&[chunks.peek().is_some().into()]);
 	}
-	Ok(buf.position() as usize)
+	i
 }
 
 pub fn normalize_name(name: &str) -> String {
