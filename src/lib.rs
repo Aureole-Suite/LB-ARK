@@ -111,7 +111,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 
 		if let Some((_, entry)) = entry {
 			let buf = unsafe { std::slice::from_raw_parts_mut(buf, 0x600000) };
-			if let Some(v) = show_error(do_read(nr, entry, buf)).flatten() {
+			if let Some(v) = do_read(nr, entry, buf) {
 				return v
 			}
 		}
@@ -239,30 +239,31 @@ fn path_of(e: &Entry) -> Option<&str> {
 	}
 }
 
-fn do_read(nr: usize, entry: &Entry, buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
+fn do_read(nr: usize, entry: &Entry, buf: &mut [u8]) -> Option<usize> {
 	if let Some(path) = path_of(entry) {
 		let path = data_dir(nr).join(path);
-		Ok(Some(read_file(&path, buf)?))
+		Some(read_file(&path, buf))
 	} else {
 		let path = data_dir(nr).join(normalize_name(&entry.name()));
 		if path.exists() {
-			Ok(Some(read_file(&path, buf)?))
+			Some(read_file(&path, buf))
 		} else {
-			Ok(None)
+			None
 		}
 	}
 }
 
-fn read_file(path: &Path, buf: &mut [u8]) -> anyhow::Result<usize> {
+fn read_file(path: &Path, buf: &mut [u8]) -> usize {
+	let data = show_error(c!(std::fs::read(path)?, "failed to read {}", rel(path).display()))
+		.unwrap_or(Vec::new()); // Give an empty file. Will probably segfault.
 	let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
 	let is_raw = ext.map_or(false, |e| e == "_ds" || e == "wav");
-	let data = c!(std::fs::read(path)?, "failed to read {}", rel(path).display())?;
-	Ok(if is_raw {
+	if is_raw {
 		buf[..data.len()].copy_from_slice(&data);
 		data.len()
 	} else {
 		fake_compress(buf, &data)
-	})
+	}
 }
 
 fn fake_compress(buf: &mut [u8], data: &[u8]) -> usize {
