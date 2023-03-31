@@ -4,7 +4,6 @@
 #![feature(try_blocks)]
 
 use std::ffi::OsString;
-use std::io::{BufReader, BufRead};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::prelude::OsStrExt;
 use std::path::{PathBuf, Path};
@@ -179,9 +178,9 @@ fn do_load_dir() -> anyhow::Result<()> {
 					continue
 				}
 
-				for (n, line) in BufReader::new(std::fs::File::open(&path)?).lines().enumerate() {
+				for (n, line) in std::fs::read_to_string(&path)?.lines().enumerate() {
 					show_error(c!({
-						parse_dir_line(nr, &line?)?
+						parse_dir_line(nr, line)?
 					}, "{}, line {}", rel(&path).display(), n+1));
 				}
 			}
