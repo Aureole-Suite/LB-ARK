@@ -8,7 +8,7 @@ from the edit cycle, and also as a way of distributing mods, reducing file
 sizes and reducing file conflicts by shipping files instead of entire archives.
 
 To install, download
-[`d3dxof.dll`](https://github.com/Kyuuhachi/LB-ARK/releases/tag/v1.0.0) and
+[`d3dxof.dll`](https://github.com/Kyuuhachi/LB-ARK/releases/latest) and
 place it in the game's main data directory (next to `ed6_win*.exe`).
 
 ## Background: How archives work
