@@ -4,8 +4,6 @@
 #![feature(try_blocks)]
 
 use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
-use std::os::windows::prelude::OsStrExt;
 use std::path::{PathBuf, Path};
 
 use windows::core::{HRESULT, PCWSTR};
@@ -47,14 +45,7 @@ pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
 
 lazy_static::lazy_static! {
 	/// Path to the main executable, generally named `ed6_win_something.exe`.
-	static ref EXE_PATH: PathBuf = {
-		let mut path = [0; 260];
-		let n = unsafe {
-			GetModuleFileNameW(HMODULE(0), &mut path)
-		};
-		let path = OsString::from_wide(&path[..n as usize]);
-		PathBuf::from(path)
-	};
+	static ref EXE_PATH: PathBuf = windows_path(|p| unsafe { GetModuleFileNameW(HMODULE(0), p) });
 	/// Path to the game directory, where all game files are located.
 	static ref GAME_DIR: &'static Path = EXE_PATH.parent().unwrap();
 	/// Path to LB-DIR data directory, where LB-DIR reads the files from.
@@ -94,11 +85,7 @@ fn init() -> anyhow::Result<()> {
 /// This is called both for .dat and other files
 fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 	// Get path to file
-	let mut path = [0; 260];
-	let n = unsafe {
-		GetFinalPathNameByHandleW(*handle, &mut path, FILE_NAME(0))
-	} as usize;
-	let path = PathBuf::from(OsString::from_wide(&path[..n]));
+	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(*handle, p, FILE_NAME(0)) });
 
 	// If the pathname refers to a .dat file, extract its number
 	let dirnr = try {
@@ -293,7 +280,16 @@ pub fn unnormalize_name(name: &str) -> Option<[u8; 12]> {
 	Some(o)
 }
 
+fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
+	use std::os::windows::ffi::OsStringExt;
+	let mut path = [0; 260];
+	let n = f(&mut path);
+	let path = OsString::from_wide(&path[..n as usize]);
+	PathBuf::from(path)
+}
+
 fn msgbox(title: &str, body: &str, style: u32) -> u32 {
+	use std::os::windows::prelude::OsStrExt;
 	let mut title = OsString::from(title).encode_wide().collect::<Vec<_>>();
 	let mut body = OsString::from(body).encode_wide().collect::<Vec<_>>();
 	title.push(0);
