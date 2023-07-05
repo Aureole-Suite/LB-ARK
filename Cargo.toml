@@ -14,7 +14,7 @@ windows = { version = "0.48.0", features = [
 	"Win32_Storage_FileSystem",
 	"Win32_UI_WindowsAndMessaging",
 ] }
-retour = "0.1.0"
+retour = { version = "0.3.0", features = ["static-detour", "thiscall-abi"] }
 anyhow = "1.0.70"
 lazy_static = "1.4.0"
 memchr = "2.5.0"
