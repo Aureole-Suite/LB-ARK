@@ -195,7 +195,7 @@ fn do_load_dir() -> anyhow::Result<()> {
 		let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
 		let is_dir = ext.map_or(false, |e| e == "dir");
 		if is_dir {
-			show_error(c!(parse_dir(&path), "parsing {}", rel(&path).display()));
+			show_error(c!(parse_dir(&path)?, "parsing {}", rel(&path).display()));
 		}
 	}
 	Ok(())
@@ -230,6 +230,8 @@ fn parse_dir(path: &Path) -> anyhow::Result<()> {
 			.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
 			.and_then(unnormalize_name)
 			.unwrap_or(*b"98_invalid__");
+
+		println!("inserting {path} at 0x{id:08X} ({name})", name=String::from_utf8_lossy(&name));
 
 		*entry = Entry {
 			name, // name
