@@ -56,16 +56,18 @@ about any video player.
 To substitute a file inside an archive, place the substitute in
 `data\ED6_DTnn\filename`, for example `data\ED6_DT21\u7000._sn`.
 
-To enable adding custom files, LB-ARK scans for `data\ED6_DTnn\*.dir` files.
-These files file should contain a list of files, one per line, with an ordinal
-(either decimal or hexadecimal), followed by a filename (which can contain
-subdirectories, if desired). If this filename is convertible to `8.3` format it
-will be so, otherwise it will be inaccessible to filename lookups.
+To add custom files, or to keep all your files together, create a
+`data\*.dir` file listing the files to insert, in json format.
 
-Multiple `*.dir` files are allowed in each archive, to enable multiple mods to
-add their own files. However, duplicate ordinals is not allowed. Each archive
-hold 65536 files[^65536], so don't just pick the lowest available numbers;
-using more diverse ordinals will likely lead to less conflicts.
+```json
+{
+  "0x00010098": "my-mod/file.bin",
+  "0x00010099": { "name": "MYFILE.BIN", "path": "my-mod/file.bin" }
+}
+```
+
+The optional `"name"` key is used for filename lookups; if absent, the name of
+the file itself is used.
 
 ## Compatibility
 
@@ -73,7 +75,7 @@ LB-ARK supports the latest Steam release (as of 2023-03-27) of all three *Sky*
 games, both DX8 and DX9 versions. It should be reasonably stable on past and
 future versions too, but this is untested.
 
-It is compatible with SoraVoice, with one caveat: SoraVoice's file redirection
+LB-ARK is compatible with SoraVoice, with one caveat: SoraVoice's file redirection
 happens before LB-ARK's, meaning if you have files both in `voice/scena` and
 `data/ED6_DT21`, SoraVoice's are the ones that will be loaded. A script
 ([`move_sora_voice.ps1`](https://github.com/Kyuuhachi/LB-ARK/raw/main/move_sora_voice.ps1))

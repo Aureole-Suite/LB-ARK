@@ -18,3 +18,5 @@ retour = { version = "0.3.0", features = ["static-detour", "thiscall-abi"] }
 anyhow = "1.0.70"
 lazy_static = "1.4.0"
 memchr = "2.5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

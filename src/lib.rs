@@ -21,6 +21,7 @@ use windows::Win32::{
 
 pub mod sigscan;
 pub mod dir;
+mod dirjson;
 
 use sigscan::sigscan;
 use dir::{DIRS, Entry};
@@ -129,7 +130,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<Vec<u8>> {
 	let dirnr = fileid >> 16;
 	let path = if let Some(path) = path_of(entry) {
-		Some(DATA_DIR.join(format!("ED6_DT{dirnr:02X}")).join(path))
+		Some(DATA_DIR.join(path))
 	} else {
 		Some(DATA_DIR.join(format!("ED6_DT{dirnr:02X}/{}", normalize_name(&entry.name()))))
 			.filter(|a| a.exists())
@@ -176,7 +177,6 @@ fn fake_compress(data: &[u8]) -> Vec<u8> {
 	out
 }
 
-
 /// Called by the game at startup, to load the .dir files into memory.
 ///
 /// This hook additionally loads `$DATA_DIR/ED6_DT??/*.dir`.
@@ -189,62 +189,49 @@ fn read_dir_files() {
 }
 
 fn do_load_dir() -> anyhow::Result<()> {
-	for nr in 0..64 {
-		let dir = DATA_DIR.join(format!("ED6_DT{nr:02X}"));
-		if dir.is_dir() {
-			for f in dir.read_dir()? {
-				let path = f?.path();
-				let ext = path.extension().and_then(|a| a.to_str());
-				if ext.map_or(true, |a| a.to_lowercase() != "dir") {
-					continue
-				}
-
-				for (n, line) in std::fs::read_to_string(&path)?.lines().enumerate() {
-					show_error(c!({
-						parse_dir_line(nr, line)?
-					}, "{}, line {}", rel(&path).display(), n+1));
-				}
-			}
+	for file in DATA_DIR.read_dir()? {
+		let file = file?;
+		let path = file.path();
+		let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
+		let is_dir = ext.map_or(false, |e| e == "dir");
+		if is_dir {
+			show_error(c!(parse_dir(&path), "parsing {}", rel(&path).display()));
 		}
 	}
 	Ok(())
 }
 
-fn parse_dir_line(arc: usize, line: &str) -> anyhow::Result<()> {
-	let (line, _) = line.split_once('#').unwrap_or((line, ""));
-	let line = line.trim();
-	if line.is_empty() {
-		return Ok(())
-	}
-
-	let Some((n, name)) = line.split_once(' ')
-		.or_else(|| line.split_once('\t'))
-		else {
-			anyhow::bail!("no space in line")
-		};
-
-	let n = if let Some(s) = n.strip_prefix("0x") {
-		u16::from_str_radix(s, 16)?
-	} else {
-		n.parse::<u16>()?
-	};
-
-	let name = name.trim();
-
+fn parse_dir(path: &Path) -> anyhow::Result<()> {
 	let mut dirs = DIRS.lock().unwrap();
-	let entry = dirs.get(arc as u8, n);
-	if entry.name != Entry::default().name {
-		let prev = path_of(entry).map_or_else(|| entry.name(), |n| n.into());
-		anyhow::bail!("index {n} is already used by {}", prev);
+	let entries = serde_json::from_reader::<_, dirjson::DirJson>(std::fs::File::open(path)?)?;
+	for (k, v) in entries.0 {
+		let arc = k.0 >> 16;
+		let file = k.0 as u16;
+		if arc >= 64 {
+			anyhow::bail!("invalid file id: {k}");
+		}
+		let entry = dirs.get(arc as u8, file);
+		if let Some(prev) = path_of(entry) {
+			anyhow::bail!("file id {k} is already used by {}", prev);
+		}
+
+		let path = Box::leak(v.path.into_boxed_str());
+
+		let name = v.name.as_deref()
+			.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
+			.and_then(unnormalize_name)
+			.unwrap_or(*b"98_invalid__");
+
+		*entry = Entry {
+			name, // name
+			offset: 0, // dat file is seeked to this position, so needs to be valid
+			csize: k.0 as usize | 0x80000000, // something unique, since the offsets are not
+			unk1: path.as_ptr() as u32,
+			unk2: path.len() as u32,
+			asize: 888888888, // magic value to denote LB-ARK file
+			ts: 0,
+		};
 	}
-
-	entry.name = unnormalize_name(name).unwrap_or(*b"98_invalid__");
-	entry.offset = 0;
-	entry.csize = n as usize;
-	entry.asize = 888888888;
-	entry.unk1 = Box::leak(name.to_owned().into_boxed_str()).as_ptr() as usize as u32;
-	entry.unk2 = name.len() as u32;
-
 	Ok(())
 }
 
