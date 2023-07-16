@@ -33,7 +33,7 @@ Files inside the archives are referenced in two different ways: by filename, or
 by file id. Just like with compression, which method is used in each situation
 seems largely arbitrary.
 
-**Filename** lookups always happen in a specific archive (for example, `._da`
+**Filename** lookups always happen in a specific archive[^specific] (for example, `._da`
 files, containing fonts, are always in `ED6_DT20`). The list of files is simply
 scanned linearly, and the first entry with a matching name is used. Internally,
 the filenames are stored as uppercase 8.3 strings like `T0310   ._DT` — as you
@@ -56,18 +56,21 @@ about any video player.
 To substitute a file inside an archive, place the substitute in
 `data\ED6_DTnn\filename`, for example `data\ED6_DT21\u7000._sn`.
 
-To add custom files, or to keep all your files together, create a
-`data\*.dir` file listing the files to insert, in json format.
+To add custom files, or to keep all your files together, create a `data\*.dir`
+file listing the files to insert or override, in json format.
 
 ```json
 {
+  "t0311._sn": "my-mod/t0311._sn",
   "0x00010098": "my-mod/file.bin",
-  "0x00010099": { "name": "MYFILE.BIN", "path": "my-mod/file.bin" }
+  "0x00010099": { "name": "myfile.bin", "path": "my-mod/file.bin" }
 }
 ```
 
 The optional `"name"` key is used for filename lookups; if absent, the name of
 the file itself is used.
+
+For technical reasons, the maximum allowed file ID is `0x003FFFFF`[^65536].
 
 ## Compatibility
 
@@ -81,6 +84,8 @@ happens before LB-ARK's, meaning if you have files both in `voice/scena` and
 ([`move_sora_voice.ps1`](https://github.com/Kyuuhachi/LB-ARK/raw/main/move_sora_voice.ps1))
 is provided to move a SoraVoice installation into LB-ARK's format.
 
+[^specific]: LB-ARK's own lookups for file overrides do no look in specific
+  archives; they look through each archive in numeric order.
 [^65536]: The games as written only support up to 2047 (FC) or 4096 (SC and 3rd)
   files, but lifting this restriction was easier, and more useful, than coding
   in this different restriction for each game.

@@ -205,14 +205,23 @@ fn parse_dir(path: &Path) -> anyhow::Result<()> {
 	let mut dirs = DIRS.lock().unwrap();
 	let entries = serde_json::from_reader::<_, dirjson::DirJson>(std::fs::File::open(path)?)?;
 	for (k, v) in entries.0 {
-		let arc = k.0 >> 16;
-		let file = k.0 as u16;
+		let id = match k {
+			dirjson::Key::Id(id) => id,
+			dirjson::Key::Name(name) => {
+				let Some(id) = unnormalize_name(&name).and_then(|a| lookup_file(a, &dirs)) else {
+					anyhow::bail!("failed to look up file {name:?}")
+				};
+				id
+			},
+		};
+		let arc = id >> 16;
+		let file = id as u16;
 		if arc >= 64 {
-			anyhow::bail!("invalid file id: {k}");
+			anyhow::bail!("invalid file id: 0x{id:08X}");
 		}
 		let entry = dirs.get(arc as u8, file);
 		if let Some(prev) = path_of(entry) {
-			anyhow::bail!("file id {k} is already used by {}", prev);
+			anyhow::bail!("file id {id:08X} is already used by {}", prev);
 		}
 
 		let path = Box::leak(v.path.into_boxed_str());
@@ -225,7 +234,7 @@ fn parse_dir(path: &Path) -> anyhow::Result<()> {
 		*entry = Entry {
 			name, // name
 			offset: 0, // dat file is seeked to this position, so needs to be valid
-			csize: k.0 as usize | 0x80000000, // something unique, since the offsets are not
+			csize: id as usize | 0x80000000, // something unique, since the offsets are not
 			unk1: path.as_ptr() as u32,
 			unk2: path.len() as u32,
 			asize: 888888888, // magic value to denote LB-ARK file
@@ -233,6 +242,17 @@ fn parse_dir(path: &Path) -> anyhow::Result<()> {
 		};
 	}
 	Ok(())
+}
+
+fn lookup_file(name: [u8; 12], dirs: &dir::Dirs) -> Option<u32> {
+	for (i, arc) in dirs.entries().iter().enumerate() {
+		for (j, e) in arc.iter().enumerate() {
+			if e.name == name {
+				return Some(((i << 16) | j) as u32)
+			}
+		}
+	}
+	None
 }
 
 fn path_of(e: &Entry) -> Option<&str> {
