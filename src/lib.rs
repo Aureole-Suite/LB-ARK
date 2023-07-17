@@ -3,38 +3,27 @@
 #![feature(decl_macro)]
 #![feature(try_blocks)]
 
-use std::ffi::OsString;
-use std::path::{PathBuf, Path};
+pub mod sigscan;
+pub mod dir;
+mod dirjson;
+mod dllmain;
+mod util;
 
-use windows::core::PCWSTR;
+use std::path::Path;
+
 use windows::Win32::{
-	Foundation::{HANDLE, HMODULE},
+	Foundation::HANDLE,
 	Storage::FileSystem::{
 		GetFinalPathNameByHandleW,
 		SetFilePointer,
 		FILE_NAME,
 		SET_FILE_POINTER_MOVE_METHOD,
 	},
-	System::LibraryLoader::GetModuleFileNameW,
-	UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE},
 };
-
-pub mod sigscan;
-pub mod dir;
-mod dirjson;
-mod dllmain;
 
 use sigscan::sigscan;
 use dir::{DIRS, Entry};
-
-lazy_static::lazy_static! {
-	/// Path to the main executable, generally named `ed6_win_something.exe`.
-	static ref EXE_PATH: PathBuf = windows_path(|p| unsafe { GetModuleFileNameW(HMODULE(0), p) });
-	/// Path to the game directory, where all game files are located.
-	static ref GAME_DIR: &'static Path = EXE_PATH.parent().unwrap();
-	/// Path to LB-DIR data directory, where LB-DIR reads the files from.
-	static ref DATA_DIR: PathBuf = GAME_DIR.join("data");
-}
+use util::{DATA_DIR, EXE_PATH, c, rel, show_error, windows_path};
 
 mod hooks {
 	use retour::static_detour;
@@ -276,51 +265,4 @@ pub fn unnormalize_name(name: &str) -> Option<[u8; 12]> {
 	o[..name.len()].copy_from_slice(name.as_bytes());
 	o[9..][..ext.len()].copy_from_slice(ext.as_bytes());
 	Some(o)
-}
-
-fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
-	use std::os::windows::ffi::OsStringExt;
-	let mut path = [0; 260];
-	let n = f(&mut path);
-	let path = OsString::from_wide(&path[..n as usize]);
-	PathBuf::from(path)
-}
-
-fn msgbox(title: &str, body: &str, style: u32) -> u32 {
-	use std::os::windows::prelude::OsStrExt;
-	let mut title = OsString::from(title).encode_wide().collect::<Vec<_>>();
-	let mut body = OsString::from(body).encode_wide().collect::<Vec<_>>();
-	title.push(0);
-	body.push(0);
-	unsafe {
-		MessageBoxW(
-			None,
-			PCWSTR::from_raw(body.as_ptr()),
-			PCWSTR::from_raw(title.as_ptr()),
-			MESSAGEBOX_STYLE(style)
-		).0 as u32
-	}
-}
-
-/// A nicer syntax for [`with_context`].
-macro c($e:expr, $($a:tt)*) {
-	<anyhow::Result<_> as anyhow::Context<_, _>>::with_context(try { $e }, || format!($($a)*))
-}
-
-/// Shows an error in an appropriate way, returning the value as an `Option`.
-fn show_error<T>(a: anyhow::Result<T>) -> Option<T> {
-	match a {
-		Ok(v) => Some(v),
-		Err(e) => {
-			let s = format!("{e:#}");
-			println!("{:?}", e.context("LB-ARK error"));
-			msgbox("LB-ARK error", &s, 0x10);
-			None
-		}
-	}
-}
-
-/// Converts the path to be relative to the game directory, for nicer error messages.
-fn rel(path: &Path) -> &Path {
-	path.strip_prefix(*GAME_DIR).unwrap_or(path)
 }
