@@ -8,6 +8,7 @@ pub mod dir;
 mod dirjson;
 mod dllmain;
 mod util;
+mod plugin;
 
 use std::path::Path;
 
@@ -35,7 +36,7 @@ mod hooks {
 
 fn init() {
 	println!("LB-ARK: init for {}", EXE_PATH.file_stem().unwrap().to_string_lossy());
-
+	show_error(plugin::init());
 	show_error(init_lb_dir());
 }
 

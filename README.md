@@ -72,6 +72,10 @@ the file itself is used.
 
 For technical reasons, the maximum allowed file ID is `0x003FFFFF`[^65536].
 
+Additionally, LB-ARK also supports loading plugins from `data\plugins\*.dll`.
+If a function `#[no_mangle] extern "C" fn lb_init();` exists, it will be called.
+This is unrelated to archive redirection, but it's useful enough to be included.
+
 ## Compatibility
 
 LB-ARK supports the latest Steam release (as of 2023-03-27) of all three *Sky*
