@@ -6,52 +6,26 @@
 use std::ffi::OsString;
 use std::path::{PathBuf, Path};
 
-use windows::core::{HRESULT, PCWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::{
-	Foundation::{BOOL, HANDLE, HMODULE, TRUE},
+	Foundation::{HANDLE, HMODULE},
 	Storage::FileSystem::{
 		GetFinalPathNameByHandleW,
 		SetFilePointer,
 		FILE_NAME,
 		SET_FILE_POINTER_MOVE_METHOD,
 	},
-	System::LibraryLoader::{
-		LoadLibraryA,
-		GetModuleFileNameW,
-		GetProcAddress,
-	},
+	System::LibraryLoader::GetModuleFileNameW,
 	UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE},
 };
 
 pub mod sigscan;
 pub mod dir;
 mod dirjson;
+mod dllmain;
 
 use sigscan::sigscan;
 use dir::{DIRS, Entry};
-
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *const ()) -> BOOL {
-	if reason != 1 /* DLL_PROCESS_ATTACH */ { return TRUE }
-
-	println!("LB-ARK: init for {}", EXE_PATH.file_stem().unwrap().to_string_lossy());
-
-	show_error(init()).is_some().into()
-}
-
-#[no_mangle]
-#[allow(non_snake_case, non_upper_case_globals)]
-pub extern "system" fn DirectXFileCreate(dxfile: *const *const ()) -> HRESULT {
-	lazy_static::lazy_static! {
-		static ref next_DirectXFileCreate: extern "system" fn(*const *const ()) -> HRESULT = unsafe {
-			let lib = LoadLibraryA(windows::s!("C:\\Windows\\System32\\d3dxof.dll")).unwrap();
-			let w = GetProcAddress(lib, windows::s!("DirectXFileCreate")).unwrap();
-			std::mem::transmute(w)
-		};
-	}
-	next_DirectXFileCreate(dxfile)
-}
 
 lazy_static::lazy_static! {
 	/// Path to the main executable, generally named `ed6_win_something.exe`.
@@ -70,8 +44,14 @@ mod hooks {
 	}
 }
 
+fn init() {
+	println!("LB-ARK: init for {}", EXE_PATH.file_stem().unwrap().to_string_lossy());
+
+	show_error(init_lb_dir());
+}
+
 /// Initializes the hooks.
-fn init() -> anyhow::Result<()> {
+fn init_lb_dir() -> anyhow::Result<()> {
 	unsafe {
 		hooks::read_from_file.initialize(std::mem::transmute(sigscan! {
 			0xA1 ? ? ? ?   // mov eax, ?
