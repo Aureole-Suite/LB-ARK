@@ -23,7 +23,7 @@ use windows::Win32::{
 
 use sigscan::sigscan;
 use dir::{DIRS, Entry};
-use util::{DATA_DIR, EXE_PATH, c, rel, show_error, windows_path};
+use util::{DATA_DIR, EXE_PATH, c, rel, show_error, windows_path, has_extension};
 
 mod hooks {
 	use retour::static_detour;
@@ -168,11 +168,8 @@ fn read_dir_files() {
 
 fn do_load_dir() -> anyhow::Result<()> {
 	for file in DATA_DIR.read_dir()? {
-		let file = file?;
-		let path = file.path();
-		let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
-		let is_dir = ext.map_or(false, |e| e == "dir");
-		if is_dir {
+		let path = file?.path();
+		if has_extension(&path, "dir") {
 			show_error(c!(parse_dir(&path)?, "parsing {}", rel(&path).display()));
 		}
 	}

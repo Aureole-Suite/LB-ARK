@@ -63,3 +63,10 @@ lazy_static::lazy_static! {
 	/// Path to LB-DIR data directory, where LB-DIR reads the files from.
 	pub static ref DATA_DIR: PathBuf = GAME_DIR.join("data");
 }
+
+pub fn has_extension(path: &Path, ext: &str) -> bool {
+	match try { path.extension()?.to_str()?.to_lowercase() } {
+		Some(t) => t == ext,
+		None => false,
+	}
+}
