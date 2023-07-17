@@ -15,7 +15,11 @@ use windows::Win32::{
 		FILE_NAME,
 		SET_FILE_POINTER_MOVE_METHOD,
 	},
-	System::LibraryLoader::GetModuleFileNameW,
+	System::LibraryLoader::{
+		LoadLibraryA,
+		GetModuleFileNameW,
+		GetProcAddress,
+	},
 	UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE},
 };
 
@@ -37,11 +41,16 @@ pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *co
 }
 
 #[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn DirectXFileCreate(_dxfile: *const *const ()) -> HRESULT {
-	// I don't think this function is ever called. If I'm wrong, oh well.
-	show_error::<()>(Err(anyhow::anyhow!("DirectXFileCreate called")));
-	std::process::abort()
+#[allow(non_snake_case, non_upper_case_globals)]
+pub extern "system" fn DirectXFileCreate(dxfile: *const *const ()) -> HRESULT {
+	lazy_static::lazy_static! {
+		static ref next_DirectXFileCreate: extern "system" fn(*const *const ()) -> HRESULT = unsafe {
+			let lib = LoadLibraryA(windows::s!("C:\\Windows\\System32\\d3dxof.dll")).unwrap();
+			let w = GetProcAddress(lib, windows::s!("DirectXFileCreate")).unwrap();
+			std::mem::transmute(w)
+		};
+	}
+	next_DirectXFileCreate(dxfile)
 }
 
 lazy_static::lazy_static! {
