@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::{PathBuf, Path};
 
-use windows::core::PCWSTR;
+use windows::core::HSTRING;
 use windows::Win32::{
 	Foundation::HMODULE,
 	System::LibraryLoader::GetModuleFileNameW,
@@ -17,16 +17,11 @@ pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
 }
 
 pub fn msgbox(title: &str, body: &str, style: u32) -> u32 {
-	use std::os::windows::prelude::OsStrExt;
-	let mut title = OsString::from(title).encode_wide().collect::<Vec<_>>();
-	let mut body = OsString::from(body).encode_wide().collect::<Vec<_>>();
-	title.push(0);
-	body.push(0);
 	unsafe {
 		MessageBoxW(
 			None,
-			PCWSTR::from_raw(body.as_ptr()),
-			PCWSTR::from_raw(title.as_ptr()),
+			&HSTRING::from(body),
+			&HSTRING::from(title),
 			MESSAGEBOX_STYLE(style)
 		).0 as u32
 	}
