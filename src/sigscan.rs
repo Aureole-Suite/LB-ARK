@@ -5,7 +5,6 @@ pub macro sig($($a:tt)*) {
 macro unit {
 	(?) => { None },
 	($a:literal) => { Some($a) },
-	($($t:tt)*) => { compile_error!(stringify!($($t)*)) },
 }
 
 #[track_caller]
