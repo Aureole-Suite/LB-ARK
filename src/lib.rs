@@ -1,5 +1,3 @@
-#![feature(abi_thiscall)]
-#![feature(once_cell)]
 #![feature(decl_macro)]
 #![feature(try_blocks)]
 
