@@ -1,6 +1,8 @@
 use std::ffi::OsString;
 use std::path::{PathBuf, Path};
 
+use color_eyre::eyre;
+
 use windows::core::HSTRING;
 use windows::Win32::{
 	Foundation::HMODULE,
@@ -12,7 +14,8 @@ pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
 	use std::os::windows::ffi::OsStringExt;
 	let mut path = [0; 260];
 	let n = f(&mut path);
-	let path = OsString::from_wide(&path[..n as usize]);
+	let start = if path.starts_with(&b"\\\\?\\".map(|a| a as u16)) { 4 } else { 0 };
+	let path = OsString::from_wide(&path[start..n as usize]);
 	PathBuf::from(path)
 }
 
@@ -27,27 +30,49 @@ pub fn msgbox(title: &str, body: &str, style: u32) -> u32 {
 	}
 }
 
-/// A nicer syntax for [`with_context`].
-pub macro c($e:expr, $($a:tt)*) {
-	<anyhow::Result<_> as anyhow::Context<_, _>>::with_context(try { $e }, || format!($($a)*))
-}
-
 /// Shows an error in an appropriate way, returning the value as an `Option`.
-pub fn show_error<T>(a: anyhow::Result<T>) -> Option<T> {
+pub fn catch<T>(a: eyre::Result<T>) -> Option<T> {
 	match a {
 		Ok(v) => Some(v),
 		Err(e) => {
-			let s = format!("{e:#}");
-			println!("{:?}", e.context("LB-ARK error"));
-			msgbox("LB-ARK error", &s, 0x10);
+			let spantrace: &tracing_error::SpanTrace = e.handler().downcast_ref::<color_eyre::Handler>().unwrap().span_trace().unwrap();
+			// SAFETY: lol yeah
+			let err_span: &tracing::Span = unsafe { std::mem::transmute(spantrace) };
+			err_span.in_scope(|| tracing::error!("{}", e));
+
+			let mut msg = e.to_string();
+			spantrace.with_spans(|meta, fields| {
+				use std::fmt::Write;
+				write!(msg, "\n• {}::{}", meta.target(), meta.name()).unwrap();
+				if !fields.is_empty() {
+					write!(msg, "{{{}}}", strip_ansi(fields.to_owned())).unwrap();
+				}
+				true
+			});
+
+			msgbox("LB-ARK error", &msg, 0x10);
 			None
 		}
 	}
 }
 
+fn strip_ansi(mut s: String) -> String {
+	let mut keep = true;
+	s.retain(|c| {
+		let v;
+		match c {
+			'\x1B' => { keep = false; v = false; }
+			'm' => { keep = true; v = false; }
+			_ => v = keep
+		}
+		v
+	});
+	s
+}
+
 /// Converts the path to be relative to the game directory, for nicer error messages.
-pub fn rel(path: &Path) -> &Path {
-	path.strip_prefix(*GAME_DIR).unwrap_or(path)
+pub fn rel(path: &Path) -> std::path::Display {
+	path.strip_prefix(*GAME_DIR).unwrap_or(path).display()
 }
 
 lazy_static::lazy_static! {

@@ -10,6 +10,9 @@ mod plugin;
 
 use std::path::{Path, PathBuf};
 
+use color_eyre::eyre::{Result, bail};
+use tracing::{instrument, field::display};
+
 use windows::Win32::{
 	Foundation::HANDLE,
 	Storage::FileSystem::{
@@ -22,7 +25,7 @@ use windows::Win32::{
 
 use sigscan::sigscan;
 use dir::{DIRS, Entry};
-use util::{DATA_DIR, EXE_PATH, c, rel, show_error, windows_path, has_extension};
+use util::{DATA_DIR, EXE_PATH, rel, catch, windows_path, has_extension};
 
 mod hooks {
 	use retour::static_detour;
@@ -32,14 +35,19 @@ mod hooks {
 	}
 }
 
+#[instrument(skip_all)]
 fn init() {
-	println!("LB-ARK: init for {}", EXE_PATH.file_stem().unwrap().to_string_lossy());
-	show_error(plugin::init());
-	show_error(init_lb_dir());
+	tracing::info!(
+		exe = %EXE_PATH.file_stem().unwrap().to_string_lossy(),
+		data = %DATA_DIR.display(),
+		"init",
+	);
+	catch(plugin::init());
+	catch(init_lb_dir());
 }
 
 /// Initializes the hooks.
-fn init_lb_dir() -> anyhow::Result<()> {
+fn init_lb_dir() -> Result<()> {
 	unsafe {
 		hooks::read_from_file.initialize(std::mem::transmute(sigscan! {
 			0xA1 ? ? ? ?   // mov eax, ?
@@ -60,10 +68,22 @@ fn init_lb_dir() -> anyhow::Result<()> {
 
 /// Called by the game to read from any file into memory.
 ///
-/// This is called both for .dat and other files
+/// This is called both for .dat and other files.
+#[instrument(skip_all, fields(path, pos, len))]
 fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 	// Get path to file
-	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(*handle, p, FILE_NAME(0)) });
+	let path = windows_path(|p| unsafe {
+		GetFinalPathNameByHandleW(*handle, p, FILE_NAME(0))
+	});
+
+	// Get file offset
+	let pos = unsafe {
+		SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
+	} as usize;
+
+	tracing::Span::current().record("path", &display(rel(&path)));
+	tracing::Span::current().record("pos", pos);
+	tracing::Span::current().record("len", len);
 
 	// If the pathname refers to a .dat file, extract its number
 	let dirnr = try {
@@ -74,12 +94,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 
 	if let Some(dirnr) = dirnr {
 		// If it is a dir file, we still don't know *which* file is being loaded.
-		// All we have is the file position, which is set by a different function.
-		// So we extract the offset and find the file with the corresponding offset from the .dat file.
-		let pos = unsafe {
-			SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
-		} as usize;
-
+		// We have to check the dir file for a matching pos/len.
 		let dirs = DIRS.lock().unwrap();
 		let entry = dirs.entries()[dirnr].iter()
 			.enumerate()
@@ -87,15 +102,17 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 
 		if let Some((filenr, entry)) = entry {
 			let fileid = ((dirnr << 16) | filenr) as u32;
-			// We only have an unstructured buffer to write to.
 			if let Some(path) = get_redirect_file(fileid, entry) {
-				let v = show_error(c!(read_file(&path)?, "failed to read {}", rel(&path).display()));
-				if let Some(v) = v {
-					let buf = unsafe { std::slice::from_raw_parts_mut(buf, v.len()) };
-					buf.copy_from_slice(&v);
+				tracing::debug!(path = %rel(&path), "redirecting");
+				if let Some(v) = catch(read_file(&path)) {
+					unsafe {
+						std::ptr::copy_nonoverlapping(v.as_ptr(), buf, v.len());
+					}
 					return v.len()
 				}
 			}
+		} else {
+			tracing::warn!(pos, len, "no matching file");
 		}
 	}
 
@@ -105,14 +122,22 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 }
 
 /// Reads the file to be redirected to, if any.
+#[instrument(skip_all, fields(fileid=?dirjson::Key::Id(fileid), entry = &*entry.name()))]
 fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
-	let dirnr = fileid >> 16;
-	if let Some(path) = path_of(entry) {
-		Some(DATA_DIR.join(path))
-	} else {
-		Some(DATA_DIR.join(format!("ED6_DT{dirnr:02X}/{}", normalize_name(&entry.name()))))
-			.filter(|a| a.exists())
+	let path = path_of(entry).map(|a| DATA_DIR.join(a));
+	if let Some(path) = path {
+		if path.exists() {
+			tracing::debug!(path = %rel(&path), "explicit override");
+			return Some(path)
+		} else {
+			tracing::error!(path = %rel(&path), "explicit override does not exist");
+		}
 	}
+
+	let dirnr = fileid >> 16;
+	let path = DATA_DIR.join(format!("ED6_DT{dirnr:02X}/{}", normalize_name(&entry.name())));
+	tracing::debug!(path = %rel(&path), exists = path.exists(), "checking implicit override");
+	path.exists().then_some(path)
 }
 
 /// Reads a file into memory, compressing it if necessary.
@@ -120,10 +145,12 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 /// Most files in the dat files are compressed, but this is inconvenient for users so LB-ARK handles that implicitly.
 ///
 /// Allocating memory here is not strictly necessary, but it makes the code much nicer.
-fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
-	let data = std::fs::read(path)?;
+#[instrument(skip_all, fields(path=%rel(path), is_raw))]
+fn read_file(path: &Path) -> Result<Vec<u8>> {
 	let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
 	let is_raw = ext.map_or(false, |e| e == "_ds" || e == "wav");
+	tracing::Span::current().record("is_raw", is_raw);
+	let data = std::fs::read(path)?;
 	if is_raw {
 		Ok(data)
 	} else {
@@ -153,67 +180,77 @@ fn fake_compress(data: &[u8]) -> Vec<u8> {
 
 /// Called by the game at startup, to load the .dir files into memory.
 ///
-/// This hook additionally loads `$DATA_DIR/ED6_DT??/*.dir`.
+/// This hook additionally loads `$DATA_DIR/*.dir`.
 fn read_dir_files() {
 	unsafe {
 		hooks::read_dir_files.call();
 	}
 
-	show_error(c!(do_load_dir(), "failed to load dir files"));
+	catch(load_dir_files());
 }
 
-fn do_load_dir() -> anyhow::Result<()> {
+#[instrument(skip_all)]
+fn load_dir_files() -> Result<()> {
 	for file in DATA_DIR.read_dir()? {
 		let path = file?.path();
 		if has_extension(&path, "dir") {
-			show_error(c!(parse_dir(&path)?, "parsing {}", rel(&path).display()));
+			catch(parse_dir_file(&path));
 		}
 	}
 	Ok(())
 }
 
-fn parse_dir(path: &Path) -> anyhow::Result<()> {
+#[instrument(skip_all, fields(path = %rel(path)))]
+fn parse_dir_file(path: &Path) -> Result<()> {
 	let mut dirs = DIRS.lock().unwrap();
 	let entries = serde_json::from_reader::<_, dirjson::DirJson>(std::fs::File::open(path)?)?;
 	for (k, v) in entries.0 {
-		let id = match k {
-			dirjson::Key::Id(id) => id,
-			dirjson::Key::Name(name) => {
-				let Some(id) = unnormalize_name(&name).and_then(|a| lookup_file(a, &dirs)) else {
-					anyhow::bail!("failed to look up file {name:?}")
-				};
+		catch(parse_dir_entry(&mut dirs, k, v));
+	}
+	Ok(())
+}
+
+#[instrument(skip_all, fields(key=?k, id))]
+fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> Result<()> {
+	let id = match k {
+		dirjson::Key::Id(id) => id,
+		dirjson::Key::Name(name) => match unnormalize_name(&name).and_then(|a| lookup_file(a, dirs)) {
+			Some(id) => {
+				tracing::Span::current().record("id", &display(format_args!("0x{id:08X}")));
 				id
 			},
-		};
-		let arc = id >> 16;
-		let file = id as u16;
-		if arc >= 64 {
-			anyhow::bail!("invalid file id: 0x{id:08X}");
-		}
-		let entry = dirs.get(arc as u8, file);
-		if let Some(prev) = path_of(entry) {
-			anyhow::bail!("file id {id:08X} is already used by {}", prev);
-		}
+			None => bail!("attempted to override file that doesn't exist"),
+		},
+	};
 
-		let path = Box::leak(v.path.into_boxed_str());
-
-		let name = v.name.as_deref()
-			.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
-			.and_then(unnormalize_name)
-			.unwrap_or(*b"98_invalid__");
-
-		println!("inserting {path} at 0x{id:08X} ({name})", name=String::from_utf8_lossy(&name));
-
-		*entry = Entry {
-			name, // name
-			offset: 0, // dat file is seeked to this position, so needs to be valid
-			csize: id as usize | 0x80000000, // something unique, since the offsets are not
-			unk1: path.as_ptr() as u32,
-			unk2: path.len() as u32,
-			asize: 888888888, // magic value to denote LB-ARK file
-			ts: 0,
-		};
+	let arc = id >> 16;
+	let file = id as u16;
+	if arc >= 64 {
+		bail!("invalid file id: archive > 0x3F");
 	}
+	let entry = dirs.get(arc as u8, file);
+	if let Some(prev) = path_of(entry) {
+		bail!("file id already used by {}", prev);
+	}
+
+	let path = Box::leak(v.path.into_boxed_str());
+
+	let name = v.name.as_deref()
+		.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
+		.and_then(unnormalize_name)
+		.unwrap_or(*b"/_______.___");
+
+	tracing::info!(name = %String::from_utf8_lossy(&name), path = %rel(Path::new(path)), "inserting override");
+
+	*entry = Entry {
+		name, // name
+		offset: 0, // dat file is seeked to this position, so needs to be valid
+		csize: id as usize | 0x80000000, // something unique, since the offsets are not
+		unk1: path.as_ptr() as u32,
+		unk2: path.len() as u32,
+		asize: 888888888, // magic value to denote LB-ARK file
+		ts: 0,
+	};
 	Ok(())
 }
 

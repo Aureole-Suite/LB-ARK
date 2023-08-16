@@ -6,10 +6,19 @@ pub struct DirJson(
 	pub Vec<(Key, Entry)>
 );
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Key {
 	Id(u32),
 	Name(String),
+}
+
+impl std::fmt::Debug for Key {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Self::Id(arg) => write!(f, "0x{arg:08X}"),
+			Self::Name(arg) => write!(f, "{arg:?}"),
+		}
+	}
 }
 
 impl<'de> Deserialize<'de> for Key {

@@ -63,8 +63,8 @@ impl Dirs {
 			0x89 0x04 0xBD ? ? ? ?  // mov dword ptr [edi*4 + dir_entries], eax
 			0x47                    // inc edi
 		};
-		let lens = &**(n.add(3) as *const *const _);
-		let ptrs = &**(n.add(16) as *const *const _);
+		let lens = &*std::ptr::read_unaligned(n.add(3) as *const *const _);
+		let ptrs = &*std::ptr::read_unaligned(n.add(16) as *const *const _);
 		let entries = std::array::from_fn(|_| Vec::new());
 		Dirs {
 			lens,

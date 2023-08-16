@@ -16,6 +16,10 @@ use windows::Win32::{
 pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *const ()) -> BOOL {
 	if reason != 1 /* DLL_PROCESS_ATTACH */ { return TRUE }
 
+	init_tracing();
+
+	tracing::debug!("LB-DIR inject init hook");
+
 	unsafe {
 		let peb: *const PEB;
 		std::arch::asm!("mov {0}, fs:[0x30]", out(reg) peb);
@@ -27,6 +31,25 @@ pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *co
 	}
 
 	TRUE
+}
+
+fn init_tracing() {
+	use tracing_error::ErrorLayer;
+	use tracing_subscriber::prelude::*;
+	use tracing_subscriber::{fmt, EnvFilter};
+
+	let fmt_layer = fmt::layer().with_target(false);
+	let filter_layer = EnvFilter::try_from_default_env()
+		.or_else(|_| EnvFilter::try_new("info"))
+		.unwrap();
+
+	tracing_subscriber::registry()
+		.with(filter_layer)
+		.with(fmt_layer)
+		.with(ErrorLayer::default())
+		.init();
+
+	color_eyre::install().unwrap();
 }
 
 static_detour! {
