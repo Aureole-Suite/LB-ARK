@@ -8,7 +8,7 @@ mod dllmain;
 mod util;
 mod plugin;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::{
 	Foundation::HANDLE,
@@ -88,10 +88,13 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 		if let Some((filenr, entry)) = entry {
 			let fileid = ((dirnr << 16) | filenr) as u32;
 			// We only have an unstructured buffer to write to.
-			if let Some(v) = get_redirect_file(fileid, entry) {
-				let buf = unsafe { std::slice::from_raw_parts_mut(buf, v.len()) };
-				buf.copy_from_slice(&v);
-				return v.len()
+			if let Some(path) = get_redirect_file(fileid, entry) {
+				let v = show_error(c!(read_file(&path)?, "failed to read {}", rel(&path).display()));
+				if let Some(v) = v {
+					let buf = unsafe { std::slice::from_raw_parts_mut(buf, v.len()) };
+					buf.copy_from_slice(&v);
+					return v.len()
+				}
 			}
 		}
 	}
@@ -102,27 +105,21 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 }
 
 /// Reads the file to be redirected to, if any.
-///
-/// Allocating memory here is not strictly necessary, but it makes the code much nicer.
-fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<Vec<u8>> {
+fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 	let dirnr = fileid >> 16;
-	let path = if let Some(path) = path_of(entry) {
+	if let Some(path) = path_of(entry) {
 		Some(DATA_DIR.join(path))
 	} else {
 		Some(DATA_DIR.join(format!("ED6_DT{dirnr:02X}/{}", normalize_name(&entry.name()))))
 			.filter(|a| a.exists())
-	};
-
-	if let Some(path) = path {
-		show_error(c!(read_file(&path)?, "failed to read {}", rel(&path).display()))
-	} else {
-		None
 	}
 }
 
 /// Reads a file into memory, compressing it if necessary.
 ///
 /// Most files in the dat files are compressed, but this is inconvenient for users so LB-ARK handles that implicitly.
+///
+/// Allocating memory here is not strictly necessary, but it makes the code much nicer.
 fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
 	let data = std::fs::read(path)?;
 	let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
