@@ -218,7 +218,7 @@ fn parse_dir_file(path: &Path) -> Result<()> {
 fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> Result<()> {
 	let id = match k {
 		dirjson::Key::Id(id) => id,
-		dirjson::Key::Name(name) => match Entry::to_stored_name(&name).and_then(|a| lookup_file(a, dirs)) {
+		dirjson::Key::Name(name) => match lookup_file(dirs, &name) {
 			Some(id) => {
 				tracing::Span::current().record("id", &display(format_args!("0x{id:08X}")));
 				id
@@ -239,15 +239,13 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 
 	let path = Box::leak(v.path.into_boxed_str());
 
-	let name = v.name.as_deref()
+	let stored_name = v.name.as_deref()
 		.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
 		.and_then(Entry::to_stored_name)
 		.unwrap_or(*b"/_______.___");
 
-	tracing::info!(name = %String::from_utf8_lossy(&name), path = %rel(Path::new(path)), "inserting override");
-
 	*entry = Entry {
-		name, // name
+		stored_name, // name
 		offset: 0, // dat file is seeked to this position, so needs to be valid
 		csize: id as usize | 0x80000000, // something unique, since the offsets are not
 		unk1: path.as_ptr() as u32,
@@ -255,13 +253,16 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 		asize: 888888888, // magic value to denote LB-ARK file
 		ts: 0,
 	};
+
+	tracing::info!(name = &entry.name(), path = %rel(Path::new(path)), "inserting override");
 	Ok(())
 }
 
-fn lookup_file(name: [u8; 12], dirs: &dir::Dirs) -> Option<u32> {
+fn lookup_file(dirs: &dir::Dirs, name: &str) -> Option<u32> {
+	let stored_name = Entry::to_stored_name(name)?;
 	for (i, arc) in dirs.entries().iter().enumerate() {
 		for (j, e) in arc.iter().enumerate() {
-			if e.name == name {
+			if e.stored_name == stored_name {
 				return Some(((i << 16) | j) as u32)
 			}
 		}

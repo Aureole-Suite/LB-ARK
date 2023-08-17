@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Entry {
-	pub name: [u8; 12],
+	pub stored_name: [u8; 12],
 	pub unk1: u32,
 	pub csize: usize,
 	pub unk2: u32,
@@ -24,7 +24,7 @@ impl std::fmt::Debug for Entry {
 impl Default for Entry {
 	fn default() -> Self {
 		Self {
-			name: *b"/_______.___",
+			stored_name: *b"/_______.___",
 			unk1: 0,
 			csize: 0,
 			unk2: 0,
@@ -37,7 +37,7 @@ impl Default for Entry {
 
 impl Entry {
 	pub fn name(&self) -> String {
-		let name = String::from_utf8_lossy(&self.name).to_lowercase();
+		let name = String::from_utf8_lossy(&self.stored_name).to_lowercase();
 		if let Some((name, ext)) = name.split_once('.') {
 			format!("{}.{ext}", name.trim_end_matches(' '))
 		} else {
