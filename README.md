@@ -33,13 +33,10 @@ Files inside the archives are referenced in two different ways: by filename, or
 by file id. Just like with compression, which method is used in each situation
 seems largely arbitrary.
 
-**Filename** lookups always happen in a specific archive[^specific] (for example, `._da`
-files, containing fonts, are always in `ED6_DT20`). The list of files is simply
-scanned linearly, and the first entry with a matching name is used. Internally,
-the filenames are stored as uppercase 8.3 strings like `T0310   ._DT` — as you
-may have seen in SoraVoice, for example. However, I reject this notation: all
-my tools display this as `t0310._dt`. To the game, those two are identical, and
-one of them does not make my eyes bleed.
+**Filename** lookups always happen in a specific archive[^specific] (for
+example, `._da` files, containing fonts, are always in `ED6_DT20`). The list of
+files is simply scanned linearly, and the first entry with a matching name is
+used.
 
 **File ids** consist of a pair of numbers, denoting which archive the file is
 in, and an ordinal inside this archive, as listed in the `.dir` file. In this
@@ -50,6 +47,15 @@ archive.
 Some `ED6_DTnn.dat` files have no corresponding `.dir` file. These are in fact
 not archive files at all — they are video files, which can be played with just
 about any video player.
+
+### A note on filenames
+
+Internally, filenames are stored in the archives as uppercase 8.3 strings,
+like `T0310   ._DT`. However, a multitude of factors[^factors] indicate that
+the intended interpretation is as `t0310._dt`[^case], so this is what I use.
+Unfortunately, several other tools, including SoraVoice and ED6Unpacker, expose
+these raw names, and so the filenames need to be converted to the proper format
+for use with LB-ARK.
 
 ## Usage
 
@@ -90,6 +96,12 @@ is provided to move a SoraVoice installation into LB-ARK's format.
 
 [^specific]: LB-ARK's own lookups for file overrides do no look in specific
   archives; they look through each archive in numeric order.
+[^factors]: Including numerous strings found inside the exe and data files, and
+  the file structures of other *Trails* games, including *Sky Evolution*.
+[^case]: Internal strings give no clear answer on whether to use upper or
+  lowercase names, but all other *Trails* games use lowercase, so I recommend
+  that convention. That said, NTFS is case insensitive, so it makes no real
+  difference, unlike the spaces.
 [^65536]: The games as written only support up to 2047 (FC) or 4096 (SC and 3rd)
   files, but lifting this restriction was easier, and more useful, than coding
   in this different restriction for each game.
