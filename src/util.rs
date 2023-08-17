@@ -1,8 +1,6 @@
 use std::ffi::OsString;
 use std::path::{PathBuf, Path};
 
-use color_eyre::eyre;
-
 use windows::core::HSTRING;
 use windows::Win32::{
 	Foundation::HMODULE,
@@ -35,24 +33,36 @@ pub fn catch<T>(a: eyre::Result<T>) -> Option<T> {
 	match a {
 		Ok(v) => Some(v),
 		Err(e) => {
-			let spantrace: &tracing_error::SpanTrace = e.handler().downcast_ref::<color_eyre::Handler>().unwrap().span_trace().unwrap();
-			// SAFETY: lol yeah
-			let err_span: &tracing::Span = unsafe { std::mem::transmute(spantrace) };
-			err_span.in_scope(|| tracing::error!("{}", e));
+			let span = e.handler().downcast_ref::<Handler>().unwrap().span.clone();
+			span.in_scope(|| tracing::error!("{e}"));
+			msgbox("LB-ARK error", &format!("{e:#}"), 0x10);
+			None
+		}
+	}
+}
 
-			let mut msg = e.to_string();
-			spantrace.with_spans(|meta, fields| {
-				use std::fmt::Write;
-				write!(msg, "\n• {}::{}", meta.target(), meta.name()).unwrap();
+#[derive(Debug)]
+pub struct Handler {
+	pub span: tracing::Span,
+}
+
+impl eyre::EyreHandler for Handler {
+	fn debug(&self, error: &dyn std::error::Error, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		std::fmt::Debug::fmt(error, f)
+	}
+
+	fn display(&self, e: &dyn std::error::Error, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		std::fmt::Display::fmt(e, f)?;
+		if f.alternate() {
+			tracing_error::SpanTrace::new(self.span.clone()).with_spans(|meta, fields| {
+				write!(f, "\n• {}::{}", meta.target(), meta.name()).unwrap();
 				if !fields.is_empty() {
-					write!(msg, "{{{}}}", strip_ansi(fields.to_owned())).unwrap();
+					write!(f, "{{{}}}", strip_ansi(fields.to_owned())).unwrap();
 				}
 				true
 			});
-
-			msgbox("LB-ARK error", &msg, 0x10);
-			None
 		}
+		Ok(())
 	}
 }
 
@@ -68,6 +78,10 @@ fn strip_ansi(mut s: String) -> String {
 		v
 	});
 	s
+}
+
+pub fn install_eyre() -> Result<(), eyre::InstallError> {
+	eyre::set_hook(Box::new(|_| Box::new(Handler { span: tracing::Span::current() })))
 }
 
 /// Converts the path to be relative to the game directory, for nicer error messages.

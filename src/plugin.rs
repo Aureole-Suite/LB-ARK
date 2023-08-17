@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use color_eyre::eyre::Result;
+use eyre::Result;
 use tracing::instrument;
 
 use windows::core::HSTRING;
