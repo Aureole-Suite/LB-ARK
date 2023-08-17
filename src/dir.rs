@@ -1,5 +1,4 @@
 use std::sync::Mutex;
-use std::borrow::Cow;
 use std::cell::Cell;
 
 use lazy_static::lazy_static;
@@ -37,12 +36,24 @@ impl Default for Entry {
 }
 
 impl Entry {
-	pub fn name(&self) -> Cow<str> {
-		if self.name == [0; 12] {
-			"".into()
+	pub fn name(&self) -> String {
+		let name = String::from_utf8_lossy(&self.name).to_lowercase();
+		if let Some((name, ext)) = name.split_once('.') {
+			format!("{}.{ext}", name.trim_end_matches(' '))
 		} else {
-			String::from_utf8_lossy(&self.name)
+			name
 		}
+	}
+
+	pub fn to_stored_name(name: &str) -> Option<[u8; 12]> {
+		let (_, name) = name.rsplit_once(['/', '\\']).unwrap_or(("", name));
+		let name = name.to_uppercase();
+		let (name, ext) = name.split_once('.').unwrap_or((&name, ""));
+		if name.len() > 8 || ext.len() > 3 { return None; }
+		let mut o = *b"        .   ";
+		o[..name.len()].copy_from_slice(name.as_bytes());
+		o[9..][..ext.len()].copy_from_slice(ext.as_bytes());
+		Some(o)
 	}
 }
 

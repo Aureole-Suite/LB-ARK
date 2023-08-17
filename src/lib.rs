@@ -126,7 +126,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 }
 
 /// Reads the file to be redirected to, if any.
-#[instrument(skip_all, fields(fileid=?dirjson::Key::Id(fileid), entry = &*entry.name()))]
+#[instrument(skip_all, fields(fileid=?dirjson::Key::Id(fileid), entry = &entry.name()))]
 fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 	let path = path_of(entry).map(|a| DATA_DIR.join(a));
 	if let Some(path) = path {
@@ -139,7 +139,7 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 	}
 
 	let dirnr = fileid >> 16;
-	let path = DATA_DIR.join(format!("ED6_DT{dirnr:02X}")).join(normalize_name(&entry.name()));
+	let path = DATA_DIR.join(format!("ED6_DT{dirnr:02X}")).join(entry.name());
 	tracing::debug!(path = %rel(&path), exists = path.exists(), "checking implicit override");
 	path.exists().then_some(path)
 }
@@ -218,7 +218,7 @@ fn parse_dir_file(path: &Path) -> Result<()> {
 fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> Result<()> {
 	let id = match k {
 		dirjson::Key::Id(id) => id,
-		dirjson::Key::Name(name) => match unnormalize_name(&name).and_then(|a| lookup_file(a, dirs)) {
+		dirjson::Key::Name(name) => match Entry::to_stored_name(&name).and_then(|a| lookup_file(a, dirs)) {
 			Some(id) => {
 				tracing::Span::current().record("id", &display(format_args!("0x{id:08X}")));
 				id
@@ -241,7 +241,7 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 
 	let name = v.name.as_deref()
 		.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
-		.and_then(unnormalize_name)
+		.and_then(Entry::to_stored_name)
 		.unwrap_or(*b"/_______.___");
 
 	tracing::info!(name = %String::from_utf8_lossy(&name), path = %rel(Path::new(path)), "inserting override");
@@ -279,24 +279,4 @@ fn path_of(e: &Entry) -> Option<&str> {
 	} else {
 		None
 	}
-}
-
-pub fn normalize_name(name: &str) -> String {
-	let name = name.to_lowercase();
-	if let Some((name, ext)) = name.split_once('.') {
-		format!("{}.{ext}", name.trim_end_matches(' '))
-	} else {
-		name
-	}
-}
-
-pub fn unnormalize_name(name: &str) -> Option<[u8; 12]> {
-	let (_, name) = name.rsplit_once(['/', '\\']).unwrap_or(("", name));
-	let name = name.to_uppercase();
-	let (name, ext) = name.split_once('.').unwrap_or((&name, ""));
-	if name.len() > 8 || ext.len() > 3 { return None; }
-	let mut o = *b"        .   ";
-	o[..name.len()].copy_from_slice(name.as_bytes());
-	o[9..][..ext.len()].copy_from_slice(ext.as_bytes());
-	Some(o)
 }
