@@ -33,7 +33,7 @@ pub fn catch<T>(a: eyre::Result<T>) -> Option<T> {
 	match a {
 		Ok(v) => Some(v),
 		Err(e) => {
-			let span = e.handler().downcast_ref::<Handler>().unwrap().span.clone();
+			let span = &e.handler().downcast_ref::<Handler>().unwrap().span;
 			span.in_scope(|| tracing::error!("{e}"));
 			msgbox("LB-ARK error", &format!("{e:#}"), 0x10);
 			None
