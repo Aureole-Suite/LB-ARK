@@ -68,14 +68,10 @@ impl eyre::EyreHandler for Handler {
 
 fn strip_ansi(mut s: String) -> String {
 	let mut keep = true;
-	s.retain(|c| {
-		let v;
-		match c {
-			'\x1B' => { keep = false; v = false; }
-			'm' => { keep = true; v = false; }
-			_ => v = keep
-		}
-		v
+	s.retain(|c| match c {
+		'\x1B' => { keep = false; false }
+		'm' if !keep => { keep = true; false }
+		_ => keep
 	});
 	s
 }
