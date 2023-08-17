@@ -35,6 +35,10 @@ mod hooks {
 	}
 }
 
+lazy_static::lazy_static! {
+	static ref SPACED_FILENAMES: bool = std::env::var("LB_DIR_SPACED_FILENAMES").is_ok_and(|a| !a.is_empty());
+}
+
 #[instrument(skip_all)]
 fn init() {
 	tracing::info!(
@@ -42,10 +46,16 @@ fn init() {
 		data = %DATA_DIR.display(),
 		"init",
 	);
+
+	if *SPACED_FILENAMES {
+		tracing::warn!("spaced filenames enabled");
+	}
+
 	if !DATA_DIR.exists() {
 		tracing::warn!("data dir does not exist, creating");
 		std::fs::create_dir_all(&*DATA_DIR).unwrap();
 	}
+
 	catch(plugin::init());
 	catch(init_lb_dir());
 }
@@ -138,10 +148,23 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 		}
 	}
 
-	let dirnr = fileid >> 16;
-	let path = DATA_DIR.join(format!("ED6_DT{dirnr:02X}")).join(entry.name());
+	let dir = DATA_DIR.join(format!("ED6_DT{:02X}", fileid >> 16));
+
+	let path = dir.join(entry.name());
 	tracing::debug!(path = %rel(&path), exists = path.exists(), "checking implicit override");
-	path.exists().then_some(path)
+	if path.exists() {
+		return Some(path)
+	}
+
+	if *SPACED_FILENAMES {
+		let path = dir.join(&*String::from_utf8_lossy(&entry.stored_name));
+		tracing::debug!(path = %rel(&path), exists = path.exists(), "checking spaced implicit override");
+		if path.exists() {
+			return Some(path)
+		}
+	}
+
+	None
 }
 
 /// Reads a file into memory, compressing it if necessary.

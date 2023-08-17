@@ -57,6 +57,11 @@ Unfortunately, several other tools, including SoraVoice and ED6Unpacker, expose
 these raw names, and so the filenames need to be converted to the proper format
 for use with LB-ARK.
 
+To help with compatibility with such tools, LB-ARK accepts the
+`$LB_ARK_SPACED_FILENAMES` environment variable. If this is nonempty, LB-ARK
+will load 8.3 filenames as well. However, this is only intended for local
+development; please do not release any mods requiring this to be set.
+
 ## Usage
 
 To substitute a file inside an archive, place the substitute in
