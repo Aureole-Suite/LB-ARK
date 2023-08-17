@@ -139,7 +139,7 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 	}
 
 	let dirnr = fileid >> 16;
-	let path = DATA_DIR.join(format!("ED6_DT{dirnr:02X}/{}", normalize_name(&entry.name())));
+	let path = DATA_DIR.join(format!("ED6_DT{dirnr:02X}")).join(normalize_name(&entry.name()));
 	tracing::debug!(path = %rel(&path), exists = path.exists(), "checking implicit override");
 	path.exists().then_some(path)
 }
