@@ -10,11 +10,16 @@ use crate::util::{DATA_DIR, has_extension, catch, rel};
 
 #[instrument]
 pub fn init() -> Result<()> {
-	for file in DATA_DIR.join("plugins").read_dir()? {
-		let path = file?.path();
-		if has_extension(&path, "dll") {
-			catch(load_plugin(&path));
+	let plugindir = DATA_DIR.join("plugins");
+	if plugindir.exists() {
+		for file in plugindir.read_dir()? {
+			let path = file?.path();
+			if has_extension(&path, "dll") {
+				catch(load_plugin(&path));
+			}
 		}
+	} else {
+		tracing::info!(dir = %rel(&plugindir), "plugin dir does not exist");
 	}
 	Ok(())
 }
