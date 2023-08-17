@@ -42,6 +42,10 @@ fn init() {
 		data = %DATA_DIR.display(),
 		"init",
 	);
+	if !DATA_DIR.exists() {
+		tracing::warn!("data dir does not exist, creating");
+		std::fs::create_dir_all(&*DATA_DIR).unwrap();
+	}
 	catch(plugin::init());
 	catch(init_lb_dir());
 }
