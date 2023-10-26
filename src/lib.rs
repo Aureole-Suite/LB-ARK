@@ -230,8 +230,8 @@ fn load_dir_files() -> Result<()> {
 #[instrument(skip_all, fields(path = %rel(path)))]
 fn parse_dir_file(path: &Path) -> Result<()> {
 	let mut dirs = DIRS.lock().unwrap();
-	let entries = serde_json::from_reader::<_, dirjson::DirJson>(std::fs::File::open(path)?)?;
-	for (k, v) in entries.0 {
+	let dirjson = serde_json::from_reader::<_, dirjson::DirJson>(std::fs::File::open(path)?)?;
+	for (k, v) in dirjson.entries {
 		catch(parse_dir_entry(&mut dirs, k, v));
 	}
 	Ok(())

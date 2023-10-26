@@ -1,7 +1,10 @@
 use serde::{de::Error, de::Unexpected, Deserialize, Deserializer};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct DirJson(#[serde(deserialize_with = "pairs::deserialize")] pub Vec<(Key, Entry)>);
+pub struct DirJson {
+	#[serde(deserialize_with = "pairs::deserialize")]
+	pub entries: Vec<(Key, Entry)>,
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Key {
