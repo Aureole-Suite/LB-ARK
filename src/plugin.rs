@@ -4,9 +4,9 @@ use eyre::Result;
 use tracing::instrument;
 
 use windows::core::HSTRING;
-use windows::Win32::System::LibraryLoader::{LoadLibraryW, GetProcAddress};
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
-use crate::util::{DATA_DIR, has_extension, catch, rel};
+use crate::util::{catch, has_extension, rel, DATA_DIR};
 
 #[instrument]
 pub fn init() -> Result<()> {
@@ -35,6 +35,6 @@ fn load_plugin(path: &Path) -> Result<()> {
 			lb_init();
 		}
 	};
-	
+
 	Ok(())
 }

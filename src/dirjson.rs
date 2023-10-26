@@ -1,10 +1,7 @@
-use serde::{Deserialize, Deserializer, de::Unexpected, de::Error};
+use serde::{de::Error, de::Unexpected, Deserialize, Deserializer};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct DirJson(
-	#[serde(deserialize_with = "pairs::deserialize")]
-	pub Vec<(Key, Entry)>
-);
+pub struct DirJson(#[serde(deserialize_with = "pairs::deserialize")] pub Vec<(Key, Entry)>);
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Key {
@@ -58,10 +55,13 @@ impl<'de> Deserialize<'de> for Entry {
 				formatter.write_str("string or map")
 			}
 
-			fn visit_str<E>(self, value: &str) -> Result<Entry, E> where E: serde::de::Error {
+			fn visit_str<E>(self, value: &str) -> Result<Entry, E>
+			where
+				E: serde::de::Error,
+			{
 				Ok(Entry {
 					name: None,
-					path: value.to_owned()
+					path: value.to_owned(),
 				})
 			}
 
@@ -75,16 +75,20 @@ impl<'de> Deserialize<'de> for Entry {
 }
 
 mod pairs {
+	use serde::de::{Deserialize, MapAccess, Visitor};
 	use std::marker::PhantomData;
-	use serde::de::{Deserialize, Visitor, MapAccess};
 
-	pub fn deserialize<'de, K, V, D: serde::de::Deserializer<'de>>(deserializer: D) -> Result<Vec<(K, V)>, D::Error> where
+	pub fn deserialize<'de, K, V, D: serde::de::Deserializer<'de>>(
+		deserializer: D,
+	) -> Result<Vec<(K, V)>, D::Error>
+	where
 		K: Deserialize<'de>,
 		V: Deserialize<'de>,
 	{
 		struct MyVisitor<K, V>(PhantomData<(K, V)>);
 
-		impl<'d, K, V> Visitor<'d> for MyVisitor<K, V> where
+		impl<'d, K, V> Visitor<'d> for MyVisitor<K, V>
+		where
 			K: serde::Deserialize<'d>,
 			V: serde::Deserialize<'d>,
 		{

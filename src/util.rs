@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 
 use eyre_span::ReportSpan;
 use windows::core::HSTRING;
@@ -13,7 +13,11 @@ pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
 	use std::os::windows::ffi::OsStringExt;
 	let mut path = [0; 260];
 	let n = f(&mut path);
-	let start = if path.starts_with(&b"\\\\?\\".map(|a| a as u16)) { 4 } else { 0 };
+	let start = if path.starts_with(&b"\\\\?\\".map(|a| a as u16)) {
+		4
+	} else {
+		0
+	};
 	let path = OsString::from_wide(&path[start..n as usize]);
 	PathBuf::from(path)
 }
@@ -24,8 +28,9 @@ pub fn msgbox(title: &str, body: &str, style: u32) -> u32 {
 			None,
 			&HSTRING::from(body),
 			&HSTRING::from(title),
-			MESSAGEBOX_STYLE(style)
-		).0 as u32
+			MESSAGEBOX_STYLE(style),
+		)
+		.0 as u32
 	}
 }
 

@@ -1,20 +1,20 @@
 use retour::static_detour;
 
 use windows::core::HRESULT;
-use windows::Win32::{
-	Foundation::{BOOL, HMODULE, TRUE},
-	System::{
-		Diagnostics::Debug::IMAGE_NT_HEADERS32,
-		LibraryLoader::{GetProcAddress, LoadLibraryA},
-		SystemServices::IMAGE_DOS_HEADER,
-		Threading::PEB,
-	},
+use windows::Win32::Foundation::{BOOL, HMODULE, TRUE};
+use windows::Win32::System::{
+	Diagnostics::Debug::IMAGE_NT_HEADERS32,
+	LibraryLoader::{GetProcAddress, LoadLibraryA},
+	SystemServices::{DLL_PROCESS_ATTACH, IMAGE_DOS_HEADER},
+	Threading::PEB,
 };
 
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *const ()) -> BOOL {
-	if reason != 1 /* DLL_PROCESS_ATTACH */ { return TRUE }
+	if reason != DLL_PROCESS_ATTACH {
+		return TRUE;
+	}
 
 	init_tracing();
 
@@ -27,7 +27,11 @@ pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *co
 		let head_dos = base as *const IMAGE_DOS_HEADER;
 		let head_nt = base.offset((*head_dos).e_lfanew as isize) as *const IMAGE_NT_HEADERS32;
 		let entry = base.add((*head_nt).OptionalHeader.AddressOfEntryPoint as usize);
-		main_detour.initialize(std::mem::transmute(entry), main_hook).unwrap().enable().unwrap();
+		main_detour
+			.initialize(std::mem::transmute(entry), main_hook)
+			.unwrap()
+			.enable()
+			.unwrap();
 	}
 
 	TRUE

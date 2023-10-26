@@ -1,31 +1,26 @@
 #![feature(decl_macro)]
 #![feature(try_blocks)]
 
-pub mod sigscan;
 pub mod dir;
 mod dirjson;
 mod dllmain;
-mod util;
 mod plugin;
+pub mod sigscan;
+mod util;
 
 use std::path::{Path, PathBuf};
 
-use eyre::{Result, bail};
-use tracing::{instrument, field::display};
+use eyre::{bail, Result};
+use tracing::{field::display, instrument};
 
-use windows::Win32::{
-	Foundation::HANDLE,
-	Storage::FileSystem::{
-		GetFinalPathNameByHandleW,
-		SetFilePointer,
-		FILE_NAME,
-		SET_FILE_POINTER_MOVE_METHOD,
-	},
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Storage::FileSystem::{
+	GetFinalPathNameByHandleW, SetFilePointer, FILE_NAME, SET_FILE_POINTER_MOVE_METHOD,
 };
 
+use dir::{Entry, DIRS};
 use sigscan::sigscan;
-use dir::{DIRS, Entry};
-use util::{DATA_DIR, EXE_PATH, rel, catch, windows_path, has_extension};
+use util::{catch, has_extension, rel, windows_path, DATA_DIR, EXE_PATH};
 
 mod hooks {
 	use retour::static_detour;
@@ -63,18 +58,28 @@ fn init() {
 /// Initializes the hooks.
 fn init_lb_dir() -> Result<()> {
 	unsafe {
-		hooks::read_from_file.initialize(std::mem::transmute(sigscan! {
-			0xA1 ? ? ? ?   // mov eax, ?
-			0x83 0xEC 0x08 // sub esp, 8
-			0xA3 ? ? ? ?   // mov ?, eax
-		}), read_from_file)?.enable()?;
+		hooks::read_from_file
+			.initialize(
+				std::mem::transmute(sigscan! {
+					0xA1 ? ? ? ?   // mov eax, ?
+					0x83 0xEC 0x08 // sub esp, 8
+					0xA3 ? ? ? ?   // mov ?, eax
+				}),
+				read_from_file,
+			)?
+			.enable()?;
 
-		hooks::read_dir_files.initialize(std::mem::transmute(sigscan! {
-			0x55                          // push ebp
-			0x8B 0xEC                     // mov ebp, esp
-			0x83 0xE4 0xF8                // and esp, ~7
-			0x81 0xEC 0x9C 0x02 0x00 0x00 // sub esp, 0x29C
-		}), read_dir_files)?.enable()?;
+		hooks::read_dir_files
+			.initialize(
+				std::mem::transmute(sigscan! {
+					0x55                          // push ebp
+					0x8B 0xEC                     // mov ebp, esp
+					0x83 0xE4 0xF8                // and esp, ~7
+					0x81 0xEC 0x9C 0x02 0x00 0x00 // sub esp, 0x29C
+				}),
+				read_dir_files,
+			)?
+			.enable()?;
 	}
 
 	Ok(())
@@ -86,14 +91,10 @@ fn init_lb_dir() -> Result<()> {
 #[instrument(skip_all, fields(path, pos, len))]
 fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 	// Get path to file
-	let path = windows_path(|p| unsafe {
-		GetFinalPathNameByHandleW(*handle, p, FILE_NAME(0))
-	});
+	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(*handle, p, FILE_NAME(0)) });
 
 	// Get file offset
-	let pos = unsafe {
-		SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1))
-	} as usize;
+	let pos = unsafe { SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1)) } as usize;
 
 	tracing::Span::current().record("path", &display(rel(&path)));
 	tracing::Span::current().record("pos", pos);
@@ -110,7 +111,8 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 		// If it is a dir file, we still don't know *which* file is being loaded.
 		// We have to check the dir file for a matching pos/len.
 		let dirs = DIRS.lock().unwrap();
-		let entry = dirs.entries()[dirnr].iter()
+		let entry = dirs.entries()[dirnr]
+			.iter()
 			.enumerate()
 			.find(|(_, e)| e.offset == pos && e.csize == len);
 
@@ -122,7 +124,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 					unsafe {
 						std::ptr::copy_nonoverlapping(v.as_ptr(), buf, v.len());
 					}
-					return v.len()
+					return v.len();
 				}
 			}
 		} else {
@@ -130,9 +132,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 		}
 	}
 
-	unsafe {
-		hooks::read_from_file.call(handle, buf, len)
-	}
+	unsafe { hooks::read_from_file.call(handle, buf, len) }
 }
 
 /// Reads the file to be redirected to, if any.
@@ -142,7 +142,7 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 	if let Some(path) = path {
 		if path.exists() {
 			tracing::debug!(path = %rel(&path), "explicit override");
-			return Some(path)
+			return Some(path);
 		} else {
 			tracing::error!(path = %rel(&path), "explicit override does not exist");
 		}
@@ -153,14 +153,14 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 	let path = dir.join(entry.name());
 	tracing::debug!(path = %rel(&path), exists = path.exists(), "checking implicit override");
 	if path.exists() {
-		return Some(path)
+		return Some(path);
 	}
 
 	if *SPACED_FILENAMES {
 		let path = dir.join(&*String::from_utf8_lossy(&entry.stored_name));
 		tracing::debug!(path = %rel(&path), exists = path.exists(), "checking spaced implicit override");
 		if path.exists() {
-			return Some(path)
+			return Some(path);
 		}
 	}
 
@@ -245,7 +245,7 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 			Some(id) => {
 				tracing::Span::current().record("id", &display(format_args!("0x{id:08X}")));
 				id
-			},
+			}
 			None => bail!("attempted to override file that doesn't exist"),
 		},
 	};
@@ -262,14 +262,16 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 
 	let path = Box::leak(v.path.into_boxed_str());
 
-	let stored_name = v.name.as_deref()
+	let stored_name = v
+		.name
+		.as_deref()
 		.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
 		.and_then(Entry::to_stored_name)
 		.unwrap_or(*b"/_______.___");
 
 	*entry = Entry {
-		stored_name, // name
-		offset: 0, // dat file is seeked to this position, so needs to be valid
+		stored_name,                     // name
+		offset: 0,                       // dat file is seeked to this position, so needs to be valid
 		csize: id as usize | 0x80000000, // something unique, since the offsets are not
 		unk1: path.as_ptr() as u32,
 		unk2: path.len() as u32,
@@ -286,7 +288,7 @@ fn lookup_file(dirs: &dir::Dirs, name: &str) -> Option<u32> {
 	for (i, arc) in dirs.entries().iter().enumerate() {
 		for (j, e) in arc.iter().enumerate() {
 			if e.stored_name == stored_name {
-				return Some(((i << 16) | j) as u32)
+				return Some(((i << 16) | j) as u32);
 			}
 		}
 	}

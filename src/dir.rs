@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use std::cell::Cell;
+use std::sync::Mutex;
 
 use lazy_static::lazy_static;
 
@@ -49,7 +49,9 @@ impl Entry {
 		let (_, name) = name.rsplit_once(['/', '\\']).unwrap_or(("", name));
 		let name = name.to_uppercase();
 		let (name, ext) = name.split_once('.').unwrap_or((&name, ""));
-		if name.len() > 8 || ext.len() > 3 { return None; }
+		if name.len() > 8 || ext.len() > 3 {
+			return None;
+		}
 		let mut o = *b"        .   ";
 		o[..name.len()].copy_from_slice(name.as_bytes());
 		o[9..][..ext.len()].copy_from_slice(ext.as_bytes());
@@ -85,31 +87,21 @@ impl Dirs {
 	}
 
 	pub fn entries(&self) -> [&[Entry]; 64] {
-		std::array::from_fn(|arc| {
-			unsafe {
-				if self.ptrs[arc].get().is_null() {
-					&[]
-				} else {
-					std::slice::from_raw_parts(
-						self.ptrs[arc].get(),
-						self.lens[arc].get(),
-					)
-				}
+		std::array::from_fn(|arc| unsafe {
+			if self.ptrs[arc].get().is_null() {
+				&[]
+			} else {
+				std::slice::from_raw_parts(self.ptrs[arc].get(), self.lens[arc].get())
 			}
 		})
 	}
 
 	pub fn entries_mut(&mut self) -> [&mut [Entry]; 64] {
-		std::array::from_fn(|arc| {
-			unsafe {
-				if self.ptrs[arc].get().is_null() {
-					&mut []
-				} else {
-					std::slice::from_raw_parts_mut(
-						self.ptrs[arc].get() as *mut _,
-						self.lens[arc].get(),
-					)
-				}
+		std::array::from_fn(|arc| unsafe {
+			if self.ptrs[arc].get().is_null() {
+				&mut []
+			} else {
+				std::slice::from_raw_parts_mut(self.ptrs[arc].get() as *mut _, self.lens[arc].get())
 			}
 		})
 	}
@@ -125,9 +117,7 @@ impl Dirs {
 		if !ptr.is_null() {
 			if ptr != entries.as_ptr() {
 				entries.clear();
-				entries.extend_from_slice(unsafe {
-					std::slice::from_raw_parts(ptr, len)
-				});
+				entries.extend_from_slice(unsafe { std::slice::from_raw_parts(ptr, len) });
 			}
 			unsafe {
 				entries.set_len(len);
