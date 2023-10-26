@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::path::{PathBuf, Path};
 
+use eyre_span::ReportSpan;
 use windows::core::HSTRING;
 use windows::Win32::{
 	Foundation::HMODULE,
@@ -33,51 +34,11 @@ pub fn catch<T>(a: eyre::Result<T>) -> Option<T> {
 	match a {
 		Ok(v) => Some(v),
 		Err(e) => {
-			let span = &e.handler().downcast_ref::<Handler>().unwrap().span;
-			span.in_scope(|| tracing::error!("{e}"));
+			e.span().in_scope(|| tracing::error!("{e}"));
 			msgbox("LB-ARK error", &format!("{e:#}"), 0x10);
 			None
 		}
 	}
-}
-
-#[derive(Debug)]
-pub struct Handler {
-	pub span: tracing::Span,
-}
-
-impl eyre::EyreHandler for Handler {
-	fn debug(&self, error: &dyn std::error::Error, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		std::fmt::Debug::fmt(error, f)
-	}
-
-	fn display(&self, e: &dyn std::error::Error, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		std::fmt::Display::fmt(e, f)?;
-		if f.alternate() {
-			tracing_error::SpanTrace::new(self.span.clone()).with_spans(|meta, fields| {
-				write!(f, "\n• {}::{}", meta.target(), meta.name()).unwrap();
-				if !fields.is_empty() {
-					write!(f, "{{{}}}", strip_ansi(fields.to_owned())).unwrap();
-				}
-				true
-			});
-		}
-		Ok(())
-	}
-}
-
-fn strip_ansi(mut s: String) -> String {
-	let mut keep = true;
-	s.retain(|c| match c {
-		'\x1B' => { keep = false; false }
-		'm' if !keep => { keep = true; false }
-		_ => keep
-	});
-	s
-}
-
-pub fn install_eyre() -> Result<(), eyre::InstallError> {
-	eyre::set_hook(Box::new(|_| Box::new(Handler { span: tracing::Span::current() })))
 }
 
 /// Converts the path to be relative to the game directory, for nicer error messages.

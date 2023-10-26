@@ -49,7 +49,7 @@ fn init_tracing() {
 		.with(ErrorLayer::default())
 		.init();
 
-	crate::util::install_eyre().unwrap();
+	eyre_span::install().unwrap();
 }
 
 static_detour! {
