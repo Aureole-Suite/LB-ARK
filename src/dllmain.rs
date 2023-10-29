@@ -3,10 +3,10 @@ use retour::static_detour;
 use windows::core::HRESULT;
 use windows::Win32::Foundation::{BOOL, HMODULE, TRUE};
 use windows::Win32::System::{
-	Diagnostics::Debug::IMAGE_NT_HEADERS32,
 	LibraryLoader::{GetProcAddress, LoadLibraryA},
-	SystemServices::{DLL_PROCESS_ATTACH, IMAGE_DOS_HEADER},
-	Threading::PEB,
+	ProcessStatus::{GetModuleInformation, MODULEINFO},
+	SystemServices::DLL_PROCESS_ATTACH,
+	Threading::{GetCurrentProcess, PEB},
 };
 
 #[no_mangle]
@@ -21,14 +21,17 @@ pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *co
 	tracing::debug!("LB-DIR inject init hook");
 
 	unsafe {
-		let peb: *const PEB;
-		std::arch::asm!("mov {0}, fs:[0x30]", out(reg) peb);
-		let base = (*peb).Reserved3[1] as *const u8; // Officially a HMODULE, but it's a pointer
-		let head_dos = base as *const IMAGE_DOS_HEADER;
-		let head_nt = base.offset((*head_dos).e_lfanew as isize) as *const IMAGE_NT_HEADERS32;
-		let entry = base.add((*head_nt).OptionalHeader.AddressOfEntryPoint as usize);
+		let mut modinfo = MODULEINFO::default();
+		GetModuleInformation(
+			GetCurrentProcess(),
+			HMODULE(0),
+			&mut modinfo,
+			std::mem::size_of::<MODULEINFO>() as u32,
+		)
+		.unwrap();
+
 		main_detour
-			.initialize(std::mem::transmute(entry), main_hook)
+			.initialize(std::mem::transmute(modinfo.EntryPoint), main_hook)
 			.unwrap()
 			.enable()
 			.unwrap();
