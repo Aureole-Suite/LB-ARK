@@ -9,9 +9,8 @@ use windows::Win32::System::{
 	Threading::{GetCurrentProcess, PEB},
 };
 
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *const ()) -> BOOL {
+#[export_name = "DllMain"]
+pub extern "system" fn dll_main(_dll_module: HMODULE, reason: u32, _reserved: *const ()) -> BOOL {
 	if reason != DLL_PROCESS_ATTACH {
 		return TRUE;
 	}
@@ -68,15 +67,14 @@ fn main_hook(peb: *const PEB) -> u32 {
 	main_detour.call(peb)
 }
 
-#[no_mangle]
-#[allow(non_snake_case, non_upper_case_globals)]
-pub extern "system" fn DirectXFileCreate(dxfile: *const *const ()) -> HRESULT {
+#[export_name = "DirectXFileCreate"]
+pub extern "system" fn direct_x_file_create(dxfile: *const *const ()) -> HRESULT {
 	lazy_static::lazy_static! {
-		static ref next_DirectXFileCreate: extern "system" fn(*const *const ()) -> HRESULT = unsafe {
+		static ref DIRECT_X_FILE_CREATE: extern "system" fn(*const *const ()) -> HRESULT = unsafe {
 			let lib = LoadLibraryA(windows::s!("C:\\Windows\\System32\\d3dxof.dll")).unwrap();
 			let w = GetProcAddress(lib, windows::s!("DirectXFileCreate")).unwrap();
 			std::mem::transmute(w)
 		};
 	}
-	next_DirectXFileCreate(dxfile)
+	DIRECT_X_FILE_CREATE(dxfile)
 }
