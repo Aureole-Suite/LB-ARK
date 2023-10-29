@@ -9,6 +9,7 @@ use serde_with::DeserializeAs;
 #[serde_with::serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct DirJson {
+	#[serde(flatten)]
 	#[serde_as(as = "serde_with::Map<_, StringOrStruct<_>>")]
 	pub entries: Vec<(Key, Entry)>,
 }
