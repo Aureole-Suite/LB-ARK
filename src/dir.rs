@@ -1,7 +1,5 @@
 use std::cell::Cell;
-use std::sync::Mutex;
-
-use lazy_static::lazy_static;
+use std::sync::{LazyLock, Mutex};
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -134,6 +132,4 @@ impl Dirs {
 	}
 }
 
-lazy_static! {
-	pub static ref DIRS: Mutex<Dirs> = Mutex::new(unsafe { Dirs::new() });
-}
+pub static DIRS: LazyLock<Mutex<Dirs>> = LazyLock::new(|| Mutex::new(unsafe { Dirs::new() }));

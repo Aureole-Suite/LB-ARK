@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::sync::LazyLock;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre_span::ReportSpan;
@@ -47,14 +48,13 @@ pub fn rel(path: &Utf8Path) -> &Utf8Path {
 	path.strip_prefix(*GAME_DIR).unwrap_or(path)
 }
 
-lazy_static::lazy_static! {
-	/// Path to the main executable, generally named `ed6_win_something.exe`.
-	pub static ref EXE_PATH: Utf8PathBuf = std::env::current_exe().unwrap().try_into().unwrap();
-	/// Path to the game directory, where all game files are located.
-	pub static ref GAME_DIR: &'static Utf8Path = EXE_PATH.parent().unwrap();
-	/// Path to LB-DIR data directory, where LB-DIR reads the files from.
-	pub static ref DATA_DIR: Utf8PathBuf = GAME_DIR.join("data");
-}
+/// Path to the main executable, generally named `ed6_win_something.exe`.
+pub static EXE_PATH: LazyLock<Utf8PathBuf> =
+	LazyLock::new(|| std::env::current_exe().unwrap().try_into().unwrap());
+/// Path to the game directory, where all game files are located.
+pub static GAME_DIR: LazyLock<&'static Utf8Path> = LazyLock::new(|| EXE_PATH.parent().unwrap());
+/// Path to LB-DIR data directory, where LB-DIR reads the files from.
+pub static DATA_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| GAME_DIR.join("data"));
 
 pub fn list_files(path: &Utf8Path, ext: &str) -> std::io::Result<Vec<Utf8PathBuf>> {
 	let mut files = Vec::new();

@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use retour::static_detour;
 
 use windows::core::HRESULT;
@@ -69,12 +71,11 @@ fn main_hook(peb: *const PEB) -> u32 {
 
 #[export_name = "DirectXFileCreate"]
 pub extern "system" fn direct_x_file_create(dxfile: *const *const ()) -> HRESULT {
-	lazy_static::lazy_static! {
-		static ref DIRECT_X_FILE_CREATE: extern "system" fn(*const *const ()) -> HRESULT = unsafe {
+	static DIRECT_X_FILE_CREATE: LazyLock<extern "system" fn(*const *const ()) -> HRESULT> =
+		LazyLock::new(|| unsafe {
 			let lib = LoadLibraryA(windows::s!("C:\\Windows\\System32\\d3dxof.dll")).unwrap();
 			let w = GetProcAddress(lib, windows::s!("DirectXFileCreate")).unwrap();
 			std::mem::transmute(w)
-		};
-	}
+		});
 	DIRECT_X_FILE_CREATE(dxfile)
 }

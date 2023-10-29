@@ -278,7 +278,6 @@ dependencies = [
  "camino",
  "eyre",
  "eyre-span",
- "lazy_static",
  "memchr",
  "retour",
  "serde",

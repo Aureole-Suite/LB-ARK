@@ -1,5 +1,6 @@
 #![feature(decl_macro)]
 #![feature(try_blocks)]
+#![feature(lazy_cell)]
 
 pub mod dir;
 mod dirjson;
@@ -7,6 +8,8 @@ mod dllmain;
 mod plugin;
 pub mod sigscan;
 mod util;
+
+use std::sync::LazyLock;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre::{bail, Result};
@@ -29,9 +32,8 @@ mod hooks {
 	}
 }
 
-lazy_static::lazy_static! {
-	static ref SPACED_FILENAMES: bool = std::env::var("LB_DIR_SPACED_FILENAMES").is_ok_and(|a| !a.is_empty());
-}
+static SPACED_FILENAMES: LazyLock<bool> =
+	LazyLock::new(|| std::env::var("LB_DIR_SPACED_FILENAMES").is_ok_and(|a| !a.is_empty()));
 
 #[instrument(skip_all)]
 fn init() {
