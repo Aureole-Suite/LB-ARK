@@ -17,7 +17,7 @@ use tracing::{field::display, instrument};
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
-	GetFinalPathNameByHandleW, SetFilePointer, FILE_NAME, SET_FILE_POINTER_MOVE_METHOD,
+	GetFinalPathNameByHandleW, SetFilePointer, FILE_CURRENT, VOLUME_NAME_DOS,
 };
 
 use dir::{Entry, DIRS};
@@ -92,10 +92,10 @@ fn init_lb_dir() -> Result<()> {
 #[instrument(skip_all, fields(path, pos, len))]
 fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 	// Get path to file
-	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(*handle, p, FILE_NAME(0)) });
+	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(*handle, p, VOLUME_NAME_DOS) });
 
 	// Get file offset
-	let pos = unsafe { SetFilePointer(*handle, 0, None, SET_FILE_POINTER_MOVE_METHOD(1)) } as usize;
+	let pos = unsafe { SetFilePointer(*handle, 0, None, FILE_CURRENT) } as usize;
 
 	tracing::Span::current().record("path", &display(rel(&path)));
 	tracing::Span::current().record("pos", pos);

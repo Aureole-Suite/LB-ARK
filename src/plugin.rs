@@ -25,7 +25,7 @@ fn load_plugin(path: &Utf8Path) -> Result<()> {
 	unsafe {
 		tracing::debug!("loading dll");
 		let lib = LoadLibraryW(&HSTRING::from(path.as_str()))?;
-		if let Some(lb_init) = GetProcAddress(lib, windows::s!("lb_init")) {
+		if let Some(lb_init) = GetProcAddress(lib, windows::core::s!("lb_init")) {
 			let lb_init: extern "C" fn() = std::mem::transmute(lb_init);
 			tracing::debug!("calling lb_init()");
 			lb_init();

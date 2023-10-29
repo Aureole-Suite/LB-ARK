@@ -73,8 +73,8 @@ fn main_hook(peb: *const PEB) -> u32 {
 pub extern "system" fn direct_x_file_create(dxfile: *const *const ()) -> HRESULT {
 	static DIRECT_X_FILE_CREATE: LazyLock<extern "system" fn(*const *const ()) -> HRESULT> =
 		LazyLock::new(|| unsafe {
-			let lib = LoadLibraryA(windows::s!("C:\\Windows\\System32\\d3dxof.dll")).unwrap();
-			let w = GetProcAddress(lib, windows::s!("DirectXFileCreate")).unwrap();
+			let lib = LoadLibraryA(windows::core::s!(r"C:\Windows\System32\d3dxof.dll")).unwrap();
+			let w = GetProcAddress(lib, windows::core::s!("DirectXFileCreate")).unwrap();
 			std::mem::transmute(w)
 		});
 	DIRECT_X_FILE_CREATE(dxfile)
