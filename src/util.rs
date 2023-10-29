@@ -3,11 +3,7 @@ use std::path::{Path, PathBuf};
 
 use eyre_span::ReportSpan;
 use windows::core::HSTRING;
-use windows::Win32::{
-	Foundation::HMODULE,
-	System::LibraryLoader::GetModuleFileNameW,
-	UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE},
-};
+use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE};
 
 pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
 	use std::os::windows::ffi::OsStringExt;
@@ -53,7 +49,7 @@ pub fn rel(path: &Path) -> std::path::Display {
 
 lazy_static::lazy_static! {
 	/// Path to the main executable, generally named `ed6_win_something.exe`.
-	pub static ref EXE_PATH: PathBuf = windows_path(|p| unsafe { GetModuleFileNameW(HMODULE(0), p) });
+	pub static ref EXE_PATH: PathBuf = std::env::current_exe().unwrap();
 	/// Path to the game directory, where all game files are located.
 	pub static ref GAME_DIR: &'static Path = EXE_PATH.parent().unwrap();
 	/// Path to LB-DIR data directory, where LB-DIR reads the files from.
