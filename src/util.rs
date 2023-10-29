@@ -4,9 +4,22 @@ use std::sync::LazyLock;
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre_span::ReportSpan;
 use windows::core::HSTRING;
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Storage::FileSystem::{
+	GetFinalPathNameByHandleW, SetFilePointer, FILE_CURRENT, VOLUME_NAME_DOS,
+};
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE};
 
-pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> Utf8PathBuf {
+pub fn file_pos(handle: HANDLE) -> (Utf8PathBuf, usize) {
+	// Get path to file
+	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(handle, p, VOLUME_NAME_DOS) });
+
+	// Get file offset
+	let pos = unsafe { SetFilePointer(handle, 0, None, FILE_CURRENT) } as usize;
+	(path, pos)
+}
+
+fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> Utf8PathBuf {
 	use std::os::windows::ffi::OsStringExt;
 	let mut path = [0; 260];
 	let n = f(&mut path);
