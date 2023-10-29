@@ -19,7 +19,7 @@ use windows::Win32::Storage::FileSystem::{
 
 use dir::{Entry, DIRS};
 use sigscan::sigscan;
-use util::{catch, has_extension, rel, windows_path, DATA_DIR, EXE_PATH};
+use util::{catch, list_files, rel, windows_path, DATA_DIR, EXE_PATH};
 
 mod hooks {
 	use retour::static_detour;
@@ -217,11 +217,8 @@ fn read_dir_files() {
 
 #[instrument(skip_all)]
 fn load_dir_files() -> Result<()> {
-	for file in DATA_DIR.read_dir_utf8()? {
-		let path = file?.path().to_owned();
-		if has_extension(&path, "dir") {
-			catch(parse_dir_file(&path));
-		}
+	for file in list_files(&DATA_DIR, "dir")? {
+		catch(parse_dir_file(&file));
 	}
 	Ok(())
 }

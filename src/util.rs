@@ -56,9 +56,16 @@ lazy_static::lazy_static! {
 	pub static ref DATA_DIR: Utf8PathBuf = GAME_DIR.join("data");
 }
 
-pub fn has_extension(path: &Utf8Path, ext: &str) -> bool {
-	match try { path.extension()?.to_lowercase() } {
-		Some(t) => t == ext,
-		None => false,
+pub fn list_files(path: &Utf8Path, ext: &str) -> std::io::Result<Vec<Utf8PathBuf>> {
+	let mut files = Vec::new();
+	for file in path.read_dir_utf8()? {
+		let path = file?.path().to_owned();
+		if path
+			.extension()
+			.is_some_and(|e| e.eq_ignore_ascii_case(ext))
+		{
+			files.push(path)
+		}
 	}
+	Ok(files)
 }

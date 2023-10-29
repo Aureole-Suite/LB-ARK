@@ -5,17 +5,14 @@ use tracing::instrument;
 use windows::core::HSTRING;
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
-use crate::util::{catch, has_extension, rel, DATA_DIR};
+use crate::util::{catch, list_files, rel, DATA_DIR};
 
 #[instrument]
 pub fn init() -> Result<()> {
 	let plugindir = DATA_DIR.join("plugins");
 	if plugindir.exists() {
-		for file in plugindir.read_dir_utf8()? {
-			let path = file?.path().to_owned();
-			if has_extension(&path, "dll") {
-				catch(load_plugin(&path));
-			}
+		for file in list_files(&plugindir, "dll")? {
+			catch(load_plugin(&file));
 		}
 	} else {
 		tracing::info!(dir = %rel(&plugindir), "plugin dir does not exist");
