@@ -1,11 +1,11 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
 
+use camino::{Utf8Path, Utf8PathBuf};
 use eyre_span::ReportSpan;
 use windows::core::HSTRING;
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE};
 
-pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
+pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> Utf8PathBuf {
 	use std::os::windows::ffi::OsStringExt;
 	let mut path = [0; 260];
 	let n = f(&mut path);
@@ -15,7 +15,7 @@ pub fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> PathBuf {
 		0
 	};
 	let path = OsString::from_wide(&path[start..n as usize]);
-	PathBuf::from(path)
+	std::path::PathBuf::from(path).try_into().unwrap()
 }
 
 pub fn msgbox(title: &str, body: &str, style: u32) -> u32 {
@@ -43,21 +43,21 @@ pub fn catch<T>(a: eyre::Result<T>) -> Option<T> {
 }
 
 /// Converts the path to be relative to the game directory, for nicer error messages.
-pub fn rel(path: &Path) -> std::path::Display {
-	path.strip_prefix(*GAME_DIR).unwrap_or(path).display()
+pub fn rel(path: &Utf8Path) -> &Utf8Path {
+	path.strip_prefix(*GAME_DIR).unwrap_or(path)
 }
 
 lazy_static::lazy_static! {
 	/// Path to the main executable, generally named `ed6_win_something.exe`.
-	pub static ref EXE_PATH: PathBuf = std::env::current_exe().unwrap();
+	pub static ref EXE_PATH: Utf8PathBuf = std::env::current_exe().unwrap().try_into().unwrap();
 	/// Path to the game directory, where all game files are located.
-	pub static ref GAME_DIR: &'static Path = EXE_PATH.parent().unwrap();
+	pub static ref GAME_DIR: &'static Utf8Path = EXE_PATH.parent().unwrap();
 	/// Path to LB-DIR data directory, where LB-DIR reads the files from.
-	pub static ref DATA_DIR: PathBuf = GAME_DIR.join("data");
+	pub static ref DATA_DIR: Utf8PathBuf = GAME_DIR.join("data");
 }
 
-pub fn has_extension(path: &Path, ext: &str) -> bool {
-	match try { path.extension()?.to_str()?.to_lowercase() } {
+pub fn has_extension(path: &Utf8Path, ext: &str) -> bool {
+	match try { path.extension()?.to_lowercase() } {
 		Some(t) => t == ext,
 		None => false,
 	}

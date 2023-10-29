@@ -8,8 +8,7 @@ mod plugin;
 pub mod sigscan;
 mod util;
 
-use std::path::{Path, PathBuf};
-
+use camino::{Utf8Path, Utf8PathBuf};
 use eyre::{bail, Result};
 use tracing::{field::display, instrument};
 
@@ -37,8 +36,8 @@ lazy_static::lazy_static! {
 #[instrument(skip_all)]
 fn init() {
 	tracing::info!(
-		exe = %EXE_PATH.file_stem().unwrap().to_string_lossy(),
-		data = %DATA_DIR.display(),
+		exe = %EXE_PATH.file_stem().unwrap(),
+		data = %*DATA_DIR,
 		"init",
 	);
 
@@ -102,7 +101,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 
 	// If the pathname refers to a .dat file, extract its number
 	let dirnr = try {
-		let name = path.file_name()?.to_str()?;
+		let name = path.file_name()?;
 		let name = name.strip_prefix("ED6_DT")?.strip_suffix(".dat")?;
 		usize::from_str_radix(name, 16).ok()?
 	};
@@ -137,7 +136,7 @@ fn read_from_file(handle: *const HANDLE, buf: *mut u8, len: usize) -> usize {
 
 /// Reads the file to be redirected to, if any.
 #[instrument(skip_all, fields(fileid=?dirjson::Key::Id(fileid), entry = &entry.name()))]
-fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
+fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<Utf8PathBuf> {
 	let path = path_of(entry).map(|a| DATA_DIR.join(a));
 	if let Some(path) = path {
 		if path.exists() {
@@ -173,8 +172,8 @@ fn get_redirect_file(fileid: u32, entry: &Entry) -> Option<PathBuf> {
 ///
 /// Allocating memory here is not strictly necessary, but it makes the code much nicer.
 #[instrument(skip_all, fields(path=%rel(path), is_raw))]
-fn read_file(path: &Path) -> Result<Vec<u8>> {
-	let ext: Option<_> = try { path.extension()?.to_str()?.to_lowercase() };
+fn read_file(path: &Utf8Path) -> Result<Vec<u8>> {
+	let ext: Option<_> = try { path.extension()?.to_lowercase() };
 	let is_raw = ext.map_or(false, |e| e == "_ds" || e == "wav");
 	tracing::Span::current().record("is_raw", is_raw);
 	let data = std::fs::read(path)?;
@@ -218,8 +217,8 @@ fn read_dir_files() {
 
 #[instrument(skip_all)]
 fn load_dir_files() -> Result<()> {
-	for file in DATA_DIR.read_dir()? {
-		let path = file?.path();
+	for file in DATA_DIR.read_dir_utf8()? {
+		let path = file?.path().to_owned();
 		if has_extension(&path, "dir") {
 			catch(parse_dir_file(&path));
 		}
@@ -228,7 +227,7 @@ fn load_dir_files() -> Result<()> {
 }
 
 #[instrument(skip_all, fields(path = %rel(path)))]
-fn parse_dir_file(path: &Path) -> Result<()> {
+fn parse_dir_file(path: &Utf8Path) -> Result<()> {
 	let mut dirs = DIRS.lock().unwrap();
 	let dirjson = serde_json::from_reader::<_, dirjson::DirJson>(std::fs::File::open(path)?)?;
 	for (k, v) in dirjson.entries {
@@ -265,7 +264,7 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 	let stored_name = v
 		.name
 		.as_deref()
-		.or_else(|| Path::new(path).file_name().and_then(|a| a.to_str()))
+		.or_else(|| Utf8Path::new(path).file_name())
 		.and_then(Entry::to_stored_name)
 		.unwrap_or(*b"/_______.___");
 
@@ -279,7 +278,7 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 		ts: 0,
 	};
 
-	tracing::debug!(name = &entry.name(), path = %rel(Path::new(path)));
+	tracing::debug!(name = &entry.name(), path = %rel(Utf8Path::new(path)));
 	Ok(())
 }
 
