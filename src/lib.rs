@@ -279,7 +279,7 @@ fn parse_dir_entry(dirs: &mut dir::Dirs, k: dirjson::Key, v: dirjson::Entry) -> 
 		ts: 0,
 	};
 
-	tracing::info!(name = &entry.name(), path = %rel(Path::new(path)), "inserting override");
+	tracing::debug!(name = &entry.name(), path = %rel(Path::new(path)));
 	Ok(())
 }
 
