@@ -1,8 +1,10 @@
 use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt;
 use std::sync::LazyLock;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre_span::ReportSpan;
+
 use windows::core::HSTRING;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
@@ -11,25 +13,15 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE};
 
 pub fn file_pos(handle: HANDLE) -> (Utf8PathBuf, usize) {
-	// Get path to file
-	let path = windows_path(|p| unsafe { GetFinalPathNameByHandleW(handle, p, VOLUME_NAME_DOS) });
+	let n = unsafe { GetFinalPathNameByHandleW(handle, &mut [], VOLUME_NAME_DOS) } as usize;
+	let mut path = vec![0; n];
+	let n = unsafe { GetFinalPathNameByHandleW(handle, &mut path, VOLUME_NAME_DOS) } as usize;
+	let path = OsString::from_wide(&path[..n]);
 
-	// Get file offset
+	let path = std::path::PathBuf::from(path).try_into().unwrap();
+
 	let pos = unsafe { SetFilePointer(handle, 0, None, FILE_CURRENT) } as usize;
 	(path, pos)
-}
-
-fn windows_path(f: impl FnOnce(&mut [u16]) -> u32) -> Utf8PathBuf {
-	use std::os::windows::ffi::OsStringExt;
-	let mut path = [0; 260];
-	let n = f(&mut path);
-	let start = if path.starts_with(&b"\\\\?\\".map(|a| a as u16)) {
-		4
-	} else {
-		0
-	};
-	let path = OsString::from_wide(&path[start..n as usize]);
-	std::path::PathBuf::from(path).try_into().unwrap()
 }
 
 pub fn msgbox(title: &str, body: &str, style: u32) -> u32 {
