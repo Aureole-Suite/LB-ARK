@@ -55,7 +55,11 @@ pub fn rel(path: &Utf8Path) -> &Utf8Path {
 
 /// Path to the main executable, generally named `ed6_win_something.exe`.
 pub static EXE_PATH: LazyLock<Utf8PathBuf> =
-	LazyLock::new(|| std::env::current_exe().unwrap().try_into().unwrap());
+	LazyLock::new(|| {
+		let exe = std::env::current_exe().unwrap();
+		let exe = std::fs::canonicalize(exe).unwrap();
+		exe.try_into().unwrap()
+	});
 /// Path to the game directory, where all game files are located.
 pub static GAME_DIR: LazyLock<&'static Utf8Path> = LazyLock::new(|| EXE_PATH.parent().unwrap());
 /// Path to LB-DIR data directory, where LB-DIR reads the files from.

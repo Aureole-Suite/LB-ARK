@@ -36,7 +36,7 @@ static SPACED_FILENAMES: LazyLock<bool> =
 fn init() {
 	tracing::info!(
 		exe = %EXE_PATH.file_stem().unwrap(),
-		data = %*DATA_DIR,
+		data = %DATA_DIR.strip_prefix(r"\\?\").unwrap_or(&DATA_DIR),
 		"init",
 	);
 
